@@ -1,0 +1,64 @@
+# Design docs (private, not for contributors)
+design/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+wheels/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# PyInstaller — keep the .spec file, ignore build output
+dist/
+build/
+
+# Distribution packages
+*.whl
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Config (user profiles contain passwords)
+config/profiles/
+*.json.local
+
+# FFmpeg binaries (bundled separately in releases)
+bin/ffmpeg*
+bin/ffprobe*
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
