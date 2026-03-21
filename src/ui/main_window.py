@@ -326,8 +326,6 @@ class MainWindow(QMainWindow):
 
         if self._config.settings.auto_connect:
             self._on_start_all()
-        else:
-            self._start_demo_meters()
 
         self._log("STEAMING STREAM started.")
         if not self._running:
@@ -623,7 +621,6 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self._log(f"<span style='color:#ff3300'>Audio engine failed: {exc}</span>")
             self._running = False
-            self._start_demo_meters()
             return
 
         # Start encoder slots
@@ -686,7 +683,6 @@ class MainWindow(QMainWindow):
         self.np_label.setText("Now Playing: —")
         self.total_label.setText("Total listeners: 0")
 
-        self._start_demo_meters()
         self._log("Stopped.")
 
     def _set_broadcasting_ui(self, broadcasting: bool) -> None:
