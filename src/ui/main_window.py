@@ -315,6 +315,7 @@ class MainWindow(QMainWindow):
 
         # Runtime state
         self._audio_engine:   AudioEngine   | None = None
+        self._monitor:        AudioEngine   | None = None  # level preview only
         self._slots:          list[EncoderSlot]    = []
         self._meta_watcher:   MetadataWatcher | None = None
         self._http_api:       HttpApi | None       = None
@@ -326,6 +327,8 @@ class MainWindow(QMainWindow):
 
         if self._config.settings.auto_connect:
             self._on_start_all()
+        else:
+            self._start_monitor()
 
         self._log("STEAMING STREAM started.")
         if not self._running:
@@ -528,6 +531,9 @@ class MainWindow(QMainWindow):
 
         self.source_combo.blockSignals(False)
 
+        # Restart monitor whenever the selected device changes
+        self.source_combo.currentIndexChanged.connect(self._on_source_changed)
+
     # ------------------------------------------------------------------
     # Demo signal (replaced by real audio when engine starts)
     # ------------------------------------------------------------------
@@ -541,6 +547,50 @@ class MainWindow(QMainWindow):
     def _stop_demo_meters(self) -> None:
         if hasattr(self, "_demo_timer"):
             self._demo_timer.stop()
+
+    # ------------------------------------------------------------------
+    # Audio monitor (level preview — no encoding, no broadcast)
+    # ------------------------------------------------------------------
+
+    def _start_monitor(self) -> None:
+        """Start a lightweight audio capture just for meter display."""
+        if self._running:
+            return  # full engine handles levels when streaming
+        self._stop_monitor()
+
+        dev_data = self.source_combo.currentData()
+        if dev_data is None:
+            return
+
+        src = self._config.source
+        try:
+            self._monitor = AudioEngine()
+            self._monitor.set_on_level(
+                lambda l, r: self._sig.level_update.emit(l, r)
+            )
+            self._monitor.start(
+                device_index=dev_data.index,
+                sample_rate=src.sample_rate,
+                channels=src.channels,
+                buffer_size=src.buffer_size,
+                is_loopback=dev_data.is_loopback,
+            )
+        except Exception:
+            self._monitor = None  # device unavailable, meters stay at zero
+
+    def _stop_monitor(self) -> None:
+        if self._monitor:
+            try:
+                self._monitor.stop()
+            except Exception:
+                pass
+            self._monitor = None
+        self.meter_panel.meter.set_levels(0.0, 0.0)
+
+    def _on_source_changed(self, _index: int) -> None:
+        """Restart monitor when the user picks a different device."""
+        if not self._running:
+            self._start_monitor()
 
     def _demo_tick(self) -> None:
         self._demo_t += 0.05
@@ -571,6 +621,7 @@ class MainWindow(QMainWindow):
             return
 
         self._stop_demo_meters()
+        self._stop_monitor()
         self._running = True
 
         # --- Audio source ---
@@ -683,6 +734,7 @@ class MainWindow(QMainWindow):
         self.np_label.setText("Now Playing: —")
         self.total_label.setText("Total listeners: 0")
 
+        self._start_monitor()
         self._log("Stopped.")
 
     def _set_broadcasting_ui(self, broadcasting: bool) -> None:
@@ -866,5 +918,6 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         if self._running:
             self._on_stop_all()
+        self._stop_monitor()
         self._save_config()
         event.accept()
