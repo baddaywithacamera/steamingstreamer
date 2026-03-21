@@ -1,0 +1,48 @@
+STEAMING STREAM — Third-Party Credits
+======================================
+
+STEAMING STREAM is free software released under the GNU General Public
+License v3 (see LICENSE).
+
+This software makes use of the following third-party components:
+
+FFmpeg
+------
+Copyright (c) the FFmpeg developers.
+Licensed under the GNU General Public License v2 or later (GPL v2+),
+or the GNU Lesser General Public License v2.1 or later (LGPL v2.1+),
+depending on the build configuration.
+
+When distributed as part of a STEAMING STREAM release, the bundled FFmpeg
+binary is a GPL build (includes libmp3lame and other GPL components).
+FFmpeg source code is available at: https://ffmpeg.org/download.html
+
+PyQt6
+-----
+Copyright (c) Riverbank Computing Limited.
+Licensed under the GNU General Public License v3 (GPL v3).
+Source: https://www.riverbankcomputing.com/software/pyqt/
+
+Flask
+-----
+Copyright (c) 2010 Pallets.
+Licensed under the BSD 3-Clause License.
+Source: https://flask.palletsprojects.com/
+
+sounddevice
+-----------
+Copyright (c) 2015-2023 Matthias Geier.
+Licensed under the MIT License.
+Source: https://python-sounddevice.readthedocs.io/
+
+NumPy
+-----
+Copyright (c) 2005-2023 NumPy Developers.
+Licensed under the BSD 3-Clause License.
+Source: https://numpy.org/
+
+watchdog
+--------
+Copyright (c) 2011 Yesudeep Mangalapilly and contributors.
+Licensed under the Apache License 2.0.
+Source: https://github.com/gorakhargosh/watchdog
