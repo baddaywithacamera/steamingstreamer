@@ -73,3 +73,15 @@ GNU General Public License v3 — see [LICENSE](LICENSE).
 Releases bundling FFmpeg include GPL-licensed components.
 FFmpeg source: https://ffmpeg.org/download.html
 Full third-party credits: [CREDITS](CREDITS)
+
+## Ethical provenance
+
+Substantial portions of this software were vibe-coded — built collaboratively
+with Large Language Models trained on vast datasets of existing code. The
+ethical and legal provenance of that training data remains unresolved; not all
+of it was permissive, and not all of its authors were compensated or consulted.
+
+Because of that uncertainty, it would be wrong to commercially gate this work.
+This software must remain free — not just as a legal condition of the GPL, but
+as a matter of integrity. If the raw material was taken from the commons,
+the output belongs there too.
