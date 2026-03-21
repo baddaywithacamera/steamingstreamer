@@ -2,7 +2,7 @@
 STEAMING STREAM — Main Window
 GPL v3 — https://github.com/baddaywithacamera/steamingstreamer
 
-Chassis layout (mirrors RadioCaster spatial logic, improves on it):
+Chassis layout:
 
   ┌─────────────────────────────────────────────────────┬────┐
   │ SOURCE  [device dropdown ▾]                         │    │

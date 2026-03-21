@@ -1,5 +1,6 @@
-# Design docs (private, not for contributors)
+# Design docs and private reference material (not for contributors)
 design/
+docs/reference/
 
 # Python
 __pycache__/

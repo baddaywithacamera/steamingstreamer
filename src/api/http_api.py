@@ -1,17 +1,17 @@
 """
-STEAMING STREAM — RadioCaster-Compatible HTTP API
+STEAMING STREAM — HTTP Metadata API
 GPL v3 — https://github.com/baddaywithacamera/steamingstreamer
 
-Exposes a small HTTP server that mirrors RadioCaster's metadata update API.
-Any playout software that knows how to push metadata to RadioCaster
-(RadioDJ, StationPlaylist, etc.) will work with STEAMING STREAM unchanged.
+Lightweight HTTP server that accepts now-playing metadata pushes from
+playout software (RadioDJ, StationPlaylist, BUTT, etc.).
 
 Endpoints:
   GET  /metadata?song=TITLE[&pass=PASSWORD]
-       RadioDJ / SPL metadata push. Updates all connected streams.
+       Standard metadata push used by many playout tools.
+       Updates all connected streams.
 
   GET  /api/metadata?title=TITLE[&artist=ARTIST]
-       Alternative form used by some playout tools.
+       Alternative form (title + artist as separate params).
 
   GET  /status
        Returns JSON with stream status, listener counts, current track.
@@ -36,7 +36,7 @@ except ImportError:
 
 class HttpApi:
     """
-    RadioCaster-compatible metadata ingestion API.
+    HTTP metadata ingestion API.
 
     Usage:
         api = HttpApi(port=9000, password="secret")
@@ -109,9 +109,9 @@ class HttpApi:
             return "STEAMING STREAM OK", 200
 
         @app.route("/metadata")
-        def metadata_radiodj():
+        def metadata_push():
             """
-            RadioDJ / RadioCaster format:
+            Standard playout metadata push:
               GET /metadata?song=Artist - Title&pass=password
             """
             song = request.args.get("song", "").strip()

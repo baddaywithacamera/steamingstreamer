@@ -6,7 +6,7 @@ Four tabs:
   Source    — audio input device, sample rate, buffer size
   Metadata  — now-playing file/URL/static, polling interval
   General   — startup behaviour, tray, silence padding
-  API       — RadioCaster HTTP API port and password
+  API       — HTTP metadata API port and password
 """
 
 from __future__ import annotations
@@ -248,7 +248,7 @@ class SettingsDialog(QDialog):
         form.setSpacing(8)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
-        self.chk_api_enabled = QCheckBox("Enable RadioCaster-compatible HTTP API")
+        self.chk_api_enabled = QCheckBox("Enable HTTP metadata API")
         self.chk_api_enabled.setChecked(True)
         form.addRow("", self.chk_api_enabled)
 
