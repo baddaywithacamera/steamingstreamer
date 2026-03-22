@@ -290,7 +290,7 @@ class EncoderSlot:
             # HE-AAC (AAC+ / SBR) — dramatically better than plain AAC at low bitrates
             cmd += ["-c:a", "aac", "-profile:a", "aac_he", "-b:a", f"{c.bitrate}k"]
             fmt  = "adts"
-            mime = "audio/aac"
+            mime = "audio/aacp"   # SC2/MRS expects aacp not aac for HE-AAC streams
         elif c.format == "AAC":
             cmd += ["-c:a", "aac", "-b:a", f"{c.bitrate}k"]
             fmt  = "adts"
@@ -309,12 +309,6 @@ class EncoderSlot:
         extra: list[str] = []
         if c.server_type in ("shoutcast1", "shoutcast2"):
             extra += ["-legacy_icecast", "1"]
-        if c.server_type == "shoutcast2":
-            # Shoutcast 2 multi-stream: pass SID via icy-sid header.
-            # Mount /3 → SID 3. If mount is non-numeric (/live) SID defaults to 1.
-            sid = c.mount.lstrip("/")
-            if sid.isdigit():
-                extra += ["-headers", f"icy-sid: {sid}\r\n"]
 
         cmd += extra + [
             "-f",            fmt,
@@ -338,12 +332,7 @@ class EncoderSlot:
             return f"icecast://source:{c.password}@{c.server}:{c.port}/"
 
         else:
-            # Shoutcast 2 / MRS: SID-based routing, not path-based.
-            # If mount is a number (e.g. /3), connect to root and route via icy-sid header.
-            # If mount is a name (e.g. /live), use it as path (non-SID SC2 setups).
-            sid = mount.lstrip("/")
-            if sid.isdigit():
-                return f"icecast://source:{c.password}@{c.server}:{c.port}/"
+            # Shoutcast 2 / MRS: numeric mount = SID (e.g. /3 = stream 3)
             return f"icecast://source:{c.password}@{c.server}:{c.port}{mount}"
 
     # ------------------------------------------------------------------
