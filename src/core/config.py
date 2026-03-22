@@ -28,7 +28,8 @@ class EncoderConfig:
     channels:         str  = "stereo"   # "stereo" | "mono"
     server:           str  = ""
     port:             int  = 8000
-    mount:            str  = "/live"
+    mount:            str  = "/live"   # Icecast mount point
+    stream_id:        int  = 1         # Shoutcast 2 / MRS Stream ID (SID)
     password:         str  = ""
     server_type:      str  = "shoutcast2" # "icecast" | "shoutcast1" | "shoutcast2"
     auto_reconnect:   bool = True

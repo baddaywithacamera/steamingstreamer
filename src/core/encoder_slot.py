@@ -332,8 +332,9 @@ class EncoderSlot:
             return f"icecast://source:{c.password}@{c.server}:{c.port}/"
 
         else:
-            # Shoutcast 2 / MRS: numeric mount = SID (e.g. /3 = stream 3)
-            return f"icecast://source:{c.password}@{c.server}:{c.port}{mount}"
+            # Shoutcast 2 / MRS: route by Stream ID (SID), not mount path
+            sid = getattr(c, "stream_id", 1)
+            return f"icecast://source:{c.password}@{c.server}:{c.port}/{sid}"
 
     # ------------------------------------------------------------------
     # Metadata HTTP push

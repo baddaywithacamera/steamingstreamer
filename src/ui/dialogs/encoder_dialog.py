@@ -115,18 +115,26 @@ class EncoderDialog(QDialog):
         self.inp_port.setFixedWidth(90)
         form.addRow("Port:", self.inp_port)
 
-        # Mount
+        # Server type (before mount/SID so toggling it updates the labels)
+        self.cmb_server_type = QComboBox()
+        self.cmb_server_type.addItem("Shoutcast 2 / MRS",    "shoutcast2")
+        self.cmb_server_type.addItem("Icecast 2",             "icecast")
+        self.cmb_server_type.addItem("Shoutcast 1 (legacy)",  "shoutcast1")
+        self.cmb_server_type.setFixedWidth(180)
+        self.cmb_server_type.currentIndexChanged.connect(self._on_server_type_changed)
+        form.addRow("Server type:", self.cmb_server_type)
+
+        # Stream ID — Shoutcast 2 / MRS only
+        self.spn_stream_id = QSpinBox()
+        self.spn_stream_id.setRange(1, 99)
+        self.spn_stream_id.setValue(1)
+        self.spn_stream_id.setFixedWidth(60)
+        self._lbl_stream_id = form.addRow("Stream ID (SID):", self.spn_stream_id)
+
+        # Mount — Icecast / Shoutcast 1
         self.inp_mount = QLineEdit()
         self.inp_mount.setPlaceholderText("/live")
-        form.addRow("Mount point:", self.inp_mount)
-
-        # Server type
-        self.cmb_server_type = QComboBox()
-        self.cmb_server_type.addItem("Shoutcast 2 / MRS",  "shoutcast2")
-        self.cmb_server_type.addItem("Icecast 2",          "icecast")
-        self.cmb_server_type.addItem("Shoutcast 1 (legacy)", "shoutcast1")
-        self.cmb_server_type.setFixedWidth(180)
-        form.addRow("Server type:", self.cmb_server_type)
+        self._lbl_mount = form.addRow("Mount point:", self.inp_mount)
 
         # Password
         pw_row = QHBoxLayout()
@@ -345,6 +353,11 @@ class EncoderDialog(QDialog):
         self.cmb_bitrate.setCurrentIndex(idx if idx >= 0 else rates.index("128") if "128" in rates else 0)
         self.cmb_bitrate.blockSignals(False)
 
+    def _on_server_type_changed(self, _index: int) -> None:
+        is_sc2 = self.cmb_server_type.currentData() == "shoutcast2"
+        self.spn_stream_id.setVisible(is_sc2)
+        self.inp_mount.setVisible(not is_sc2)
+
     def _toggle_password(self, show: bool) -> None:
         mode = QLineEdit.EchoMode.Normal if show else QLineEdit.EchoMode.Password
         self.inp_password.setEchoMode(mode)
@@ -366,12 +379,14 @@ class EncoderDialog(QDialog):
         self.inp_server.setText(enc.server)
         self.inp_port.setValue(enc.port)
         self.inp_mount.setText(enc.mount)
+        self.spn_stream_id.setValue(getattr(enc, "stream_id", 1))
 
-        # Server type
+        # Server type — also triggers SID/mount visibility
         for i in range(self.cmb_server_type.count()):
             if self.cmb_server_type.itemData(i) == enc.server_type:
                 self.cmb_server_type.setCurrentIndex(i)
                 break
+        self._on_server_type_changed(0)  # ensure correct field is visible
 
         self.inp_password.setText(enc.password)
 
@@ -407,6 +422,7 @@ class EncoderDialog(QDialog):
         enc.server          = self.inp_server.text().strip()
         enc.port            = self.inp_port.value()
         enc.mount           = self.inp_mount.text().strip() or "/live"
+        enc.stream_id       = self.spn_stream_id.value()
         enc.server_type     = self.cmb_server_type.currentData() or "shoutcast2"
         enc.password        = self.inp_password.text()
         enc.format          = self.cmb_format.currentText()
