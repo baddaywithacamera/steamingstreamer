@@ -51,7 +51,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.audio import AudioEngine
-from src.core.config import AppConfig, EncoderConfig, squirrelfm_defaults
+from src.core.config import AppConfig, EncoderConfig, squirrelfm_defaults, MAX_ENCODERS
 from src.core.encoder_slot import EncoderSlot
 from src.core.metadata import MetadataWatcher
 from src.api.http_api import HttpApi
@@ -340,8 +340,8 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         self.setWindowTitle(f"STEAMING STREAM  v{self.VERSION}")
-        self.setMinimumSize(660, 500)
-        self.resize(720, 560)
+        self.setMinimumSize(560, 300)
+        self.resize(680, 380)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -864,6 +864,9 @@ class MainWindow(QMainWindow):
         self.log_view.setVisible(not self.log_view.isVisible())
 
     def _on_add_encoder(self) -> None:
+        if len(self._config.encoders) >= MAX_ENCODERS:
+            self._log(f"Maximum of {MAX_ENCODERS} encoders reached.")
+            return
         enc = EncoderConfig()
         dlg = EncoderDialog(enc, parent=self)
         if dlg.exec():

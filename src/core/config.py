@@ -137,28 +137,12 @@ class AppConfig:
 # Factory: Squirrel FM reference config
 # ---------------------------------------------------------------------------
 
+MAX_ENCODERS = 10
+
+
 def squirrelfm_defaults() -> AppConfig:
     """
-    Pre-populated config matching the Squirrel FM reference setup from the spec.
-    Server/password fields are intentionally blank — fill in from MRS control panel.
+    Default config for new installs — no encoders pre-loaded.
+    User adds what they need (up to MAX_ENCODERS).
     """
-    cfg = AppConfig(profile_name="Squirrel FM")
-    cfg.encoders = [
-        EncoderConfig(
-            name="AAC 32k — Mobile (thin)",
-            format="AAC", bitrate=32, sample_rate=44100, channels="stereo",
-        ),
-        EncoderConfig(
-            name="AAC 64k — Mobile (standard)",
-            format="AAC", bitrate=64, sample_rate=44100, channels="stereo",
-        ),
-        EncoderConfig(
-            name="AAC 128k — Standard",
-            format="AAC", bitrate=128, sample_rate=44100, channels="stereo",
-        ),
-        EncoderConfig(
-            name="MP3 392k — Hi-Fi",
-            format="MP3", bitrate=392, sample_rate=44100, channels="stereo",
-        ),
-    ]
-    return cfg
+    return AppConfig(profile_name="Default")
