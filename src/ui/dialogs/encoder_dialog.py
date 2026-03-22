@@ -146,7 +146,7 @@ class EncoderDialog(QDialog):
         # Format + bitrate on one row
         format_row = QHBoxLayout()
         self.cmb_format = QComboBox()
-        self.cmb_format.addItems(["AAC", "MP3"])
+        self.cmb_format.addItems(["AAC", "AAC+", "MP3"])
         self.cmb_format.setFixedWidth(80)
 
         self.cmb_bitrate = QComboBox()
@@ -162,7 +162,8 @@ class EncoderDialog(QDialog):
         # Sample rate + channels
         sr_row = QHBoxLayout()
         self.cmb_sample_rate = QComboBox()
-        self.cmb_sample_rate.addItems(["44100", "48000"])
+        self.cmb_sample_rate.addItems(["32000", "44100", "48000"])
+        self.cmb_sample_rate.setCurrentIndex(1)  # default 44100
         self.cmb_sample_rate.setFixedWidth(80)
 
         self.cmb_channels = QComboBox()
@@ -327,9 +328,15 @@ class EncoderDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _populate_bitrates(self, fmt: str = "AAC") -> None:
-        aac_rates = ["32", "48", "64", "96", "128", "192", "256", "320"]
-        mp3_rates = ["32", "48", "64", "96", "128", "160", "192", "256", "320", "392"]
-        rates = mp3_rates if fmt == "MP3" else aac_rates
+        aac_rates  = ["32", "48", "64", "96", "128", "192", "256", "320"]
+        aacp_rates = ["16", "24", "32", "40", "48", "64"]   # AAC+ shines at low bitrates
+        mp3_rates  = ["32", "48", "64", "96", "128", "160", "192", "256", "320"]
+        if fmt == "MP3":
+            rates = mp3_rates
+        elif fmt == "AAC+":
+            rates = aacp_rates
+        else:
+            rates = aac_rates
         current = self.cmb_bitrate.currentText() if self.cmb_bitrate.count() else "128"
         self.cmb_bitrate.blockSignals(True)
         self.cmb_bitrate.clear()
@@ -368,7 +375,7 @@ class EncoderDialog(QDialog):
 
         self.inp_password.setText(enc.password)
 
-        fmt_idx = self.cmb_format.findText(enc.format)
+        fmt_idx = self.cmb_format.findText(enc.format if enc.format else "AAC")
         if fmt_idx >= 0:
             self.cmb_format.setCurrentIndex(fmt_idx)
         self._populate_bitrates(enc.format)

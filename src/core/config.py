@@ -22,7 +22,7 @@ class EncoderConfig:
     id:               str  = field(default_factory=lambda: uuid.uuid4().hex[:8])
     enabled:          bool = True
     name:             str  = "New Encoder"
-    format:           str  = "AAC"       # "AAC" | "MP3"
+    format:           str  = "AAC"       # "AAC" | "AAC+" | "MP3"
     bitrate:          int  = 128         # kbps
     sample_rate:      int  = 44100       # Hz
     channels:         str  = "stereo"   # "stereo" | "mono"

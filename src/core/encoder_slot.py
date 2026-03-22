@@ -119,6 +119,10 @@ class EncoderSlot:
         return self._cfg.id
 
     def start(self) -> None:
+        if not self._cfg.server:
+            self._log(f"[{self._cfg.name}] Not configured — skipping.")
+            self._set_status(SlotStatus.ERROR)
+            return
         self._running = True
         self._reconnect_count = 0
         self._connect()
@@ -278,7 +282,12 @@ class EncoderSlot:
         ]
 
         # Encoder
-        if c.format == "AAC":
+        if c.format == "AAC+":
+            # HE-AAC (AAC+ / SBR) — dramatically better than plain AAC at low bitrates
+            cmd += ["-c:a", "aac", "-profile:a", "aac_he", "-b:a", f"{c.bitrate}k"]
+            fmt  = "adts"
+            mime = "audio/aac"
+        elif c.format == "AAC":
             cmd += ["-c:a", "aac", "-b:a", f"{c.bitrate}k"]
             fmt  = "adts"
             mime = "audio/aac"

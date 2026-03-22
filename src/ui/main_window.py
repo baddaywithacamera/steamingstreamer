@@ -159,7 +159,7 @@ _COL_LISTEN   = 3
 _COL_MAX      = 4
 _COL_COUNT    = 5
 
-_HEADERS = ["", "Encoder", "Status", "↓", "Max"]
+_HEADERS = ["On", "Encoder", "Status", "↓", "Max"]
 
 
 class EncoderTable(QTableWidget):
