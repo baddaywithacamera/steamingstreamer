@@ -279,7 +279,7 @@ class EncoderTable(QTableWidget):
 
 class MainWindow(QMainWindow):
 
-    VERSION = "0.1.0"
+    VERSION = "0.2.0"
 
     def __init__(self, config: AppConfig | None = None):
         super().__init__()
