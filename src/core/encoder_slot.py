@@ -273,7 +273,7 @@ class EncoderSlot:
 
         cmd = [
             ffmpeg_path(),
-            "-hide_banner", "-loglevel", "warning",
+            "-hide_banner", "-loglevel", "verbose",
             # Input: raw PCM from stdin
             "-f",  "s16le",
             "-ar", str(c.sample_rate),
@@ -301,8 +301,10 @@ class EncoderSlot:
         url = self._build_output_url()
 
         # Server-type-specific flags
+        # -legacy_icecast 1 uses old SC1 SOURCE method — only for Shoutcast 1
+        # Shoutcast 2 / MRS uses standard icecast PUT — no legacy flag needed
         extra: list[str] = []
-        if c.server_type in ("shoutcast1", "shoutcast2"):
+        if c.server_type == "shoutcast1":
             extra += ["-legacy_icecast", "1"]
 
         cmd += extra + [
