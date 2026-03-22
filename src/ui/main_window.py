@@ -330,8 +330,16 @@ class MainWindow(QMainWindow):
     # UI construction
     # ------------------------------------------------------------------
 
+    def _update_title(self, listeners: int = 0) -> None:
+        if listeners > 0:
+            self.setWindowTitle(
+                f"STEAMING STREAM  v{self.VERSION}  —  {listeners} listener{'s' if listeners != 1 else ''}"
+            )
+        else:
+            self.setWindowTitle(f"STEAMING STREAM  v{self.VERSION}")
+
     def _build_ui(self) -> None:
-        self.setWindowTitle(f"STEAMING STREAM  v{self.VERSION}")
+        self._update_title()
         self.setMinimumSize(560, 300)
         self.resize(680, 380)
 
@@ -462,30 +470,29 @@ class MainWindow(QMainWindow):
         btn_settings = QPushButton("⚙  Settings")
         btn_settings.clicked.connect(self._on_settings)
 
-        # Encoder CRUD — moved here from meter panel
-        self.btn_add_enc    = _icon_btn("+",  "#2a2a2a", tooltip="Add encoder")
-        self.btn_edit_enc   = _icon_btn("✎",  "#2a2a2a", tooltip="Edit selected encoder")
-        self.btn_remove_enc = _icon_btn("✕",  "#3a1a1a", tooltip="Remove selected encoder")
+        # Encoder CRUD — right side, same height as other buttons
+        self.btn_add_enc    = QPushButton("+")
+        self.btn_add_enc.setToolTip("Add encoder")
+        self.btn_add_enc.setFixedWidth(32)
+        self.btn_edit_enc   = QPushButton("✎")
+        self.btn_edit_enc.setToolTip("Edit selected encoder")
+        self.btn_edit_enc.setFixedWidth(32)
+        self.btn_remove_enc = QPushButton("✕")
+        self.btn_remove_enc.setToolTip("Remove selected encoder")
+        self.btn_remove_enc.setFixedWidth(32)
         self.btn_add_enc.clicked.connect(self._on_add_encoder)
         self.btn_edit_enc.clicked.connect(
             lambda: self._on_edit_encoder(self.encoder_table.currentRow(), 0)
         )
         self.btn_remove_enc.clicked.connect(self._on_remove_encoder)
 
-        self.total_label = QLabel("Total listeners: 0")
-        self.total_label.setObjectName("total_label")
-        self.total_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
-
         layout.addWidget(self.btn_start_all)
         layout.addWidget(self.btn_stop_all)
         layout.addWidget(btn_settings)
+        layout.addStretch()
         layout.addWidget(self.btn_add_enc)
         layout.addWidget(self.btn_edit_enc)
         layout.addWidget(self.btn_remove_enc)
-        layout.addStretch()
-        layout.addWidget(self.total_label)
 
         return frame
 
@@ -736,7 +743,7 @@ class MainWindow(QMainWindow):
         self.meter_panel.meter.set_levels(0.0, 0.0)
         self.encoder_table.reset_stats()
         self.np_label.setText("Now Playing: —")
-        self.total_label.setText("Total listeners: 0")
+        self._update_title(0)
 
         self._start_monitor()
         self._log("Stopped.")
@@ -796,7 +803,7 @@ class MainWindow(QMainWindow):
                 if listeners >= 0:
                     total += listeners
                 self._sig.stats_update.emit(slot.encoder_id, listeners, peak)
-        self.total_label.setText(f"Total listeners: {total}")
+        self._update_title(total)
 
     # ------------------------------------------------------------------
     # Signal handlers (run on main/Qt thread)
