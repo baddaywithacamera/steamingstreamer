@@ -252,16 +252,20 @@ class EncoderSlot:
         threading.Thread(target=_delayed, daemon=True).start()
 
     def _kill_ffmpeg(self) -> None:
-        if self._proc:
+        proc = self._proc
+        self._proc = None          # clear first to prevent race
+        if proc:
             try:
-                self._proc.stdin.close()
+                proc.stdin.close()
             except Exception:
                 pass
             try:
-                self._proc.wait(timeout=3)
+                proc.wait(timeout=3)
             except Exception:
-                self._proc.kill()
-            self._proc = None
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
 
     # ------------------------------------------------------------------
     # FFmpeg command builder
@@ -301,10 +305,9 @@ class EncoderSlot:
         url = self._build_output_url()
 
         # Server-type-specific flags
-        # -legacy_icecast 1 uses old SC1 SOURCE method — only for Shoutcast 1
-        # Shoutcast 2 / MRS uses standard icecast PUT — no legacy flag needed
+        # MRS / Shoutcast 2 still needs legacy SOURCE method — PUT is rejected immediately
         extra: list[str] = []
-        if c.server_type == "shoutcast1":
+        if c.server_type in ("shoutcast1", "shoutcast2"):
             extra += ["-legacy_icecast", "1"]
 
         cmd += extra + [
