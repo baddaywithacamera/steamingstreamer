@@ -503,12 +503,35 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # Header strip with toggle
+        header = QFrame()
+        header.setObjectName("log_header")
+        header.setFixedHeight(20)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(8, 0, 4, 0)
+        h_layout.setSpacing(0)
+
+        log_title = QLabel("LOG")
+        log_title.setObjectName("log_title")
+
+        self.btn_log_toggle = QPushButton("▾")
+        self.btn_log_toggle.setObjectName("log_toggle_btn")
+        self.btn_log_toggle.setFixedSize(20, 18)
+        self.btn_log_toggle.setFlat(True)
+        self.btn_log_toggle.setToolTip("Hide log")
+        self.btn_log_toggle.clicked.connect(self._on_view_log)
+
+        h_layout.addWidget(log_title)
+        h_layout.addStretch()
+        h_layout.addWidget(self.btn_log_toggle)
+
         self.log_view = QTextEdit()
         self.log_view.setObjectName("log_view")
         self.log_view.setReadOnly(True)
         self.log_view.setFixedHeight(80)
         self.log_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
 
+        layout.addWidget(header)
         layout.addWidget(self.log_view)
         return frame
 
@@ -868,7 +891,13 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_view_log(self) -> None:
-        self.log_view.setVisible(not self.log_view.isVisible())
+        visible = not self.log_view.isVisible()
+        self.log_view.setVisible(visible)
+        self.btn_log_toggle.setText("▾" if visible else "▸")
+        self.btn_log_toggle.setToolTip("Hide log" if visible else "Show log")
+        if not visible:
+            self.setMinimumHeight(0)
+        QTimer.singleShot(0, self.adjustSize)
 
     def _on_add_encoder(self) -> None:
         if len(self._config.encoders) >= MAX_ENCODERS:
