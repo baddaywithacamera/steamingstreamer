@@ -159,8 +159,9 @@ class AudioEngine:
         if is_loopback and platform.system() == "Windows":
             try:
                 kwargs["extra_settings"] = sd.WasapiSettings(loopback=True)
-            except AttributeError:
-                pass  # Older sounddevice — hope device name already contains loopback
+            except (AttributeError, TypeError):
+                pass  # Device is already a loopback input, or sounddevice version
+                      # doesn't support the loopback flag — open it normally
 
         try:
             self._stream = sd.InputStream(**kwargs)
