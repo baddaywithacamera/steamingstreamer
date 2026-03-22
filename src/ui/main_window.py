@@ -127,7 +127,7 @@ class EncoderStatus:
 # ---------------------------------------------------------------------------
 
 class MeterPanel(QWidget):
-    """Stereo LED meters + encoder CRUD buttons."""
+    """Stereo LED meters — full height, no buttons."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -140,19 +140,11 @@ class MeterPanel(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 6, 4, 6)
-        layout.setSpacing(4)
+        layout.setSpacing(0)
 
-        # Stereo meter
+        # Stereo meter — full height
         self.meter = StereoMeter(self)
         layout.addWidget(self.meter, stretch=1)
-
-        # Encoder management buttons
-        self.btn_add    = _icon_btn("+",  "#2a2a2a", tooltip="Add encoder")
-        self.btn_edit   = _icon_btn("✎",  "#2a2a2a", tooltip="Edit selected encoder")
-        self.btn_remove = _icon_btn("✕",  "#3a1a1a", tooltip="Remove selected encoder")
-
-        for btn in (self.btn_add, self.btn_edit, self.btn_remove):
-            layout.addWidget(btn)
 
 
 # ---------------------------------------------------------------------------
@@ -362,13 +354,8 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self._build_button_bar())
         left_layout.addWidget(self._build_log())
 
-        # Right column — meters
+        # Right column — meters (full height, no buttons)
         self.meter_panel = MeterPanel(self)
-        self.meter_panel.btn_add.clicked.connect(self._on_add_encoder)
-        self.meter_panel.btn_edit.clicked.connect(
-            lambda: self._on_edit_encoder(self.encoder_table.currentRow(), 0)
-        )
-        self.meter_panel.btn_remove.clicked.connect(self._on_remove_encoder)
 
         root.addWidget(left, stretch=5)
         root.addWidget(self.meter_panel, stretch=1)
@@ -475,6 +462,16 @@ class MainWindow(QMainWindow):
         btn_settings = QPushButton("⚙  Settings")
         btn_settings.clicked.connect(self._on_settings)
 
+        # Encoder CRUD — moved here from meter panel
+        self.btn_add_enc    = _icon_btn("+",  "#2a2a2a", tooltip="Add encoder")
+        self.btn_edit_enc   = _icon_btn("✎",  "#2a2a2a", tooltip="Edit selected encoder")
+        self.btn_remove_enc = _icon_btn("✕",  "#3a1a1a", tooltip="Remove selected encoder")
+        self.btn_add_enc.clicked.connect(self._on_add_encoder)
+        self.btn_edit_enc.clicked.connect(
+            lambda: self._on_edit_encoder(self.encoder_table.currentRow(), 0)
+        )
+        self.btn_remove_enc.clicked.connect(self._on_remove_encoder)
+
         self.total_label = QLabel("Total listeners: 0")
         self.total_label.setObjectName("total_label")
         self.total_label.setAlignment(
@@ -484,6 +481,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.btn_start_all)
         layout.addWidget(self.btn_stop_all)
         layout.addWidget(btn_settings)
+        layout.addWidget(self.btn_add_enc)
+        layout.addWidget(self.btn_edit_enc)
+        layout.addWidget(self.btn_remove_enc)
         layout.addStretch()
         layout.addWidget(self.total_label)
 
