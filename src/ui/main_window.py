@@ -341,8 +341,8 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         self._update_title()
-        self.setMinimumSize(560, 300)
-        self.resize(680, 380)
+        self.setMinimumSize(400, 180)
+        self.resize(660, 340)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -390,13 +390,14 @@ class MainWindow(QMainWindow):
         log_action = view_menu.addAction("Log",  self._on_view_log)
         log_action.setShortcut(QKeySequence("Ctrl+L"))
 
-        mb.addMenu("Help")
+        help_menu = mb.addMenu("Help")
+        help_menu.addAction("About / Keyboard Shortcuts", self._on_about)
 
     def _build_source_bar(self) -> QFrame:
         frame = QFrame()
         frame.setObjectName("source_bar")
         layout = QHBoxLayout(frame)
-        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setContentsMargins(10, 3, 10, 3)
         layout.setSpacing(8)
 
         src_label = QLabel("SOURCE")
@@ -439,7 +440,7 @@ class MainWindow(QMainWindow):
         frame = QFrame()
         frame.setObjectName("now_playing_bar")
         layout = QHBoxLayout(frame)
-        layout.setContentsMargins(10, 4, 10, 4)
+        layout.setContentsMargins(10, 2, 10, 2)
         layout.setSpacing(6)
 
         icon = QLabel("♫")
@@ -460,7 +461,7 @@ class MainWindow(QMainWindow):
         frame = QFrame()
         frame.setObjectName("button_bar")
         layout = QHBoxLayout(frame)
-        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setContentsMargins(8, 3, 8, 3)
         layout.setSpacing(6)
 
         self.btn_start_all = QPushButton("▶  Start All")
@@ -613,7 +614,12 @@ class MainWindow(QMainWindow):
         self.meter_panel.meter.set_levels(0.0, 0.0)
 
     def _on_source_changed(self, _index: int) -> None:
-        """Restart monitor when the user picks a different device."""
+        """Restart monitor and save device selection when user picks a device."""
+        dev_data = self.source_combo.currentData()
+        if dev_data is not None:
+            self._config.source.device_name  = dev_data.name
+            self._config.source.device_index = dev_data.index
+            self._save_config()
         if not self._running:
             self._start_monitor()
 
@@ -862,6 +868,63 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Settings dialog
     # ------------------------------------------------------------------
+
+    def _on_about(self) -> None:
+        dlg = QDialog(self)
+        dlg.setWindowTitle("About STEAMING STREAM")
+        dlg.setMinimumWidth(420)
+        dlg.setModal(True)
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(10)
+
+        title = QLabel(f"STEAMING STREAM  v{self.VERSION}")
+        title.setStyleSheet("font-size: 14px; font-weight: 700; color: #eee;")
+        layout.addWidget(title)
+
+        desc = QLabel(
+            "Multi-bitrate audio encoder for internet radio broadcasting.\n"
+            "GPL v3 — github.com/baddaywithacamera/steamingstreamer"
+        )
+        desc.setStyleSheet("color: #888; font-size: 10px;")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("color: #333;")
+        layout.addWidget(sep)
+
+        shortcuts = QLabel(
+            "<b>Keyboard shortcuts</b><br><br>"
+            "<b>Ctrl+L</b> &nbsp;&nbsp; Show / hide log<br>"
+            "<b>ESC</b> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Close log window<br>"
+            "<br>"
+            "<b>Metadata push URL</b> (RadioDJ / StationPlaylist)<br>"
+            "<code>http://localhost:9000/metadata?song=Artist - Title</code>"
+        )
+        shortcuts.setStyleSheet("color: #aaa; font-size: 11px; line-height: 1.6;")
+        shortcuts.setWordWrap(True)
+        shortcuts.setTextFormat(Qt.TextFormat.RichText)
+        layout.addWidget(shortcuts)
+
+        note = QLabel(
+            "⚠  Features in progress: analog VU meters, spectrum analyzer, "
+            "system tray, TUNE/TWERKER playout integration."
+        )
+        note.setStyleSheet("color: #666; font-size: 10px; font-style: italic;")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        btn = QPushButton("Close")
+        btn.setFixedWidth(80)
+        btn.clicked.connect(dlg.accept)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(btn)
+        layout.addLayout(btn_row)
+
+        dlg.exec()
 
     def _on_settings(self) -> None:
         was_running = self._running
