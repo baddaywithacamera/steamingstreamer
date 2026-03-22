@@ -277,7 +277,7 @@ class EncoderSlot:
 
         cmd = [
             ffmpeg_path(),
-            "-hide_banner", "-loglevel", "verbose",
+            "-hide_banner", "-loglevel", "warning",
             # Input: raw PCM from stdin
             "-f",  "s16le",
             "-ar", str(c.sample_rate),
@@ -309,6 +309,12 @@ class EncoderSlot:
         extra: list[str] = []
         if c.server_type in ("shoutcast1", "shoutcast2"):
             extra += ["-legacy_icecast", "1"]
+        if c.server_type == "shoutcast2":
+            # Shoutcast 2 multi-stream: pass SID via icy-sid header.
+            # Mount /3 → SID 3. If mount is non-numeric (/live) SID defaults to 1.
+            sid = c.mount.lstrip("/")
+            if sid.isdigit():
+                extra += ["-headers", f"icy-sid: {sid}\r\n"]
 
         cmd += extra + [
             "-f",            fmt,
@@ -332,8 +338,12 @@ class EncoderSlot:
             return f"icecast://source:{c.password}@{c.server}:{c.port}/"
 
         else:
-            # Shoutcast 2 (default, matches MRS / DNAS 2.x)
-            # MRS uses Shoutcast 2 — stream ID in mount, e.g. /stream or /1
+            # Shoutcast 2 / MRS: SID-based routing, not path-based.
+            # If mount is a number (e.g. /3), connect to root and route via icy-sid header.
+            # If mount is a name (e.g. /live), use it as path (non-SID SC2 setups).
+            sid = mount.lstrip("/")
+            if sid.isdigit():
+                return f"icecast://source:{c.password}@{c.server}:{c.port}/"
             return f"icecast://source:{c.password}@{c.server}:{c.port}{mount}"
 
     # ------------------------------------------------------------------
