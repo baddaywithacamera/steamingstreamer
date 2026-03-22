@@ -563,6 +563,8 @@ class MainWindow(QMainWindow):
             return
 
         src = self._config.source
+        # Use the device's actual channel count, capped at 2
+        channels = min(dev_data.channels, 2) if dev_data.channels > 0 else 2
         try:
             self._monitor = AudioEngine()
             self._monitor.set_on_level(
@@ -571,11 +573,12 @@ class MainWindow(QMainWindow):
             self._monitor.start(
                 device_index=dev_data.index,
                 sample_rate=src.sample_rate,
-                channels=src.channels,
+                channels=channels,
                 buffer_size=src.buffer_size,
                 is_loopback=dev_data.is_loopback,
             )
-        except Exception:
+        except Exception as exc:
+            self._sig.log_message.emit(f"Monitor failed: {exc}")
             self._monitor = None  # device unavailable, meters stay at zero
 
     def _stop_monitor(self) -> None:
@@ -660,12 +663,13 @@ class MainWindow(QMainWindow):
             self._audio_engine.add_slot(slot)
             self._slots.append(slot)
 
-        # Start audio engine
+        # Start audio engine — use device's actual channel count, capped at 2
+        dev_channels = min(dev_data.channels, 2) if dev_data is not None and dev_data.channels > 0 else src.channels
         try:
             self._audio_engine.start(
                 device_index=device_index,
                 sample_rate=src.sample_rate,
-                channels=src.channels,
+                channels=dev_channels,
                 buffer_size=src.buffer_size,
                 is_loopback=is_loopback,
             )
