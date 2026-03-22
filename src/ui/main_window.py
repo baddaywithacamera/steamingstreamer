@@ -342,7 +342,10 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         self._update_title()
         self.setMinimumSize(400, 180)
-        self.resize(660, 340)
+        s = self._config.settings
+        self.resize(max(400, s.window_w), max(180, s.window_h))
+        if s.window_x >= 0 and s.window_y >= 0:
+            self.move(s.window_x, s.window_y)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -1019,5 +1022,11 @@ class MainWindow(QMainWindow):
             self._on_stop_all()
         self._stop_monitor()
         self._log_dialog.hide()
+        # Persist window geometry
+        s = self._config.settings
+        s.window_x = self.x()
+        s.window_y = self.y()
+        s.window_w = self.width()
+        s.window_h = self.height()
         self._save_config()
         event.accept()

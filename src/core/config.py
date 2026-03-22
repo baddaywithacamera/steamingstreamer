@@ -77,6 +77,10 @@ class AppSettings:
     http_api_enabled:   bool = True
     http_api_port:      int  = 9000
     http_api_password:  str  = ""
+    window_x:           int  = -1    # -1 = let OS decide
+    window_y:           int  = -1
+    window_w:           int  = 660
+    window_h:           int  = 340
 
 
 # ---------------------------------------------------------------------------
