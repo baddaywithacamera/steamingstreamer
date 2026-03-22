@@ -32,10 +32,11 @@ from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QObject, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -360,7 +361,6 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self._build_encoder_table(), stretch=1)
         left_layout.addWidget(self._build_now_playing())
         left_layout.addWidget(self._build_button_bar())
-        left_layout.addWidget(self._build_log())
 
         # Right column — meters (full height, no buttons)
         self.meter_panel = MeterPanel(self)
@@ -370,6 +370,9 @@ class MainWindow(QMainWindow):
 
         # Menu bar
         self._build_menu()
+
+        # Floating log dialog (hidden until Ctrl+L)
+        self._build_log_dialog()
 
         # Stats polling timer (every 30 s while running)
         self._stats_timer = QTimer(self)
@@ -384,7 +387,8 @@ class MainWindow(QMainWindow):
         file_menu.addAction("Quit", self.close)
 
         view_menu = mb.addMenu("View")
-        view_menu.addAction("Toggle Log",  self._on_view_log)
+        log_action = view_menu.addAction("Log",  self._on_view_log)
+        log_action.setShortcut(QKeySequence("Ctrl+L"))
 
         mb.addMenu("Help")
 
@@ -499,44 +503,29 @@ class MainWindow(QMainWindow):
 
         return frame
 
-    def _build_log(self) -> QFrame:
-        frame = QFrame()
-        frame.setObjectName("log_frame")
-        layout = QVBoxLayout(frame)
+    def _build_log_dialog(self) -> None:
+        """Build the floating log dialog (hidden until Ctrl+L)."""
+        self._log_dialog = QDialog(self)
+        self._log_dialog.setWindowTitle("STEAMING STREAM — Log")
+        self._log_dialog.resize(680, 220)
+        self._log_dialog.setWindowFlags(
+            Qt.WindowType.Dialog |
+            Qt.WindowType.WindowCloseButtonHint
+        )
+
+        layout = QVBoxLayout(self._log_dialog)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        # Header strip with toggle
-        header = QFrame()
-        header.setObjectName("log_header")
-        header.setFixedHeight(20)
-        h_layout = QHBoxLayout(header)
-        h_layout.setContentsMargins(8, 0, 4, 0)
-        h_layout.setSpacing(0)
-
-        log_title = QLabel("LOG")
-        log_title.setObjectName("log_title")
-
-        self.btn_log_toggle = QPushButton("▾")
-        self.btn_log_toggle.setObjectName("log_toggle_btn")
-        self.btn_log_toggle.setFixedSize(20, 18)
-        self.btn_log_toggle.setFlat(True)
-        self.btn_log_toggle.setToolTip("Hide log")
-        self.btn_log_toggle.clicked.connect(self._on_view_log)
-
-        h_layout.addWidget(log_title)
-        h_layout.addStretch()
-        h_layout.addWidget(self.btn_log_toggle)
 
         self.log_view = QTextEdit()
         self.log_view.setObjectName("log_view")
         self.log_view.setReadOnly(True)
-        self.log_view.setFixedHeight(80)
         self.log_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
 
-        layout.addWidget(header)
+        # ESC closes the dialog
+        shortcut = QShortcut(QKeySequence("Escape"), self._log_dialog)
+        shortcut.activated.connect(self._log_dialog.hide)
+
         layout.addWidget(self.log_view)
-        return frame
 
     # ------------------------------------------------------------------
     # Source device enumeration
@@ -894,13 +883,14 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_view_log(self) -> None:
-        visible = not self.log_view.isVisible()
-        self.log_view.setVisible(visible)
-        self.btn_log_toggle.setText("▾" if visible else "▸")
-        self.btn_log_toggle.setToolTip("Hide log" if visible else "Show log")
-        if not visible:
-            self.setMinimumHeight(0)
-        QTimer.singleShot(0, self.adjustSize)
+        if self._log_dialog.isVisible():
+            self._log_dialog.hide()
+        else:
+            # Position below the main window on first show
+            geo = self.geometry()
+            self._log_dialog.move(geo.left(), geo.bottom() + 4)
+            self._log_dialog.show()
+            self._log_dialog.raise_()
 
     def _on_add_encoder(self) -> None:
         if len(self._config.encoders) >= MAX_ENCODERS:
@@ -965,5 +955,6 @@ class MainWindow(QMainWindow):
         if self._running:
             self._on_stop_all()
         self._stop_monitor()
+        self._log_dialog.hide()
         self._save_config()
         event.accept()

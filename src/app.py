@@ -161,29 +161,7 @@ QPushButton#btn_remove_enc {
 }
 QPushButton#btn_remove_enc:hover { background-color: #332222; }
 
-/* ── Log ── */
-QFrame#log_frame {
-    border-top: 1px solid #242424;
-}
-QFrame#log_header {
-    background-color: #1a1a1a;
-    border-bottom: 1px solid #242424;
-}
-QLabel#log_title {
-    color: #444;
-    font-size: 9px;
-    letter-spacing: 1px;
-}
-QPushButton#log_toggle_btn {
-    background: transparent;
-    border: none;
-    color: #555;
-    font-size: 11px;
-    padding: 0;
-}
-QPushButton#log_toggle_btn:hover {
-    color: #aaa;
-}
+/* ── Log dialog ── */
 QTextEdit#log_view {
     background-color: #111;
     border: none;
