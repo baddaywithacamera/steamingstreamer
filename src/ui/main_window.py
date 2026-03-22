@@ -472,14 +472,17 @@ class MainWindow(QMainWindow):
 
         # Encoder CRUD — right side, same height as other buttons
         self.btn_add_enc    = QPushButton("+")
+        self.btn_add_enc.setObjectName("btn_add_enc")
         self.btn_add_enc.setToolTip("Add encoder")
-        self.btn_add_enc.setFixedWidth(32)
+        self.btn_add_enc.setFixedWidth(36)
         self.btn_edit_enc   = QPushButton("✎")
+        self.btn_edit_enc.setObjectName("btn_edit_enc")
         self.btn_edit_enc.setToolTip("Edit selected encoder")
-        self.btn_edit_enc.setFixedWidth(32)
+        self.btn_edit_enc.setFixedWidth(36)
         self.btn_remove_enc = QPushButton("✕")
+        self.btn_remove_enc.setObjectName("btn_remove_enc")
         self.btn_remove_enc.setToolTip("Remove selected encoder")
-        self.btn_remove_enc.setFixedWidth(32)
+        self.btn_remove_enc.setFixedWidth(36)
         self.btn_add_enc.clicked.connect(self._on_add_encoder)
         self.btn_edit_enc.clicked.connect(
             lambda: self._on_edit_encoder(self.encoder_table.currentRow(), 0)

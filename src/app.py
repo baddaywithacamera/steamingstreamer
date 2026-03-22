@@ -136,10 +136,30 @@ QPushButton#btn_stop_all {
 }
 QPushButton#btn_stop_all:hover { background-color: #331919; }
 
-QLabel#total_label {
-    color: #555;
-    font-size: 10px;
+/* ── Encoder CRUD buttons ── */
+QPushButton#btn_add_enc {
+    background-color: #1a2a1a;
+    border-color: #2a5a2a;
+    color: #6ddd6d;
+    font-size: 14px;
+    font-weight: 700;
 }
+QPushButton#btn_add_enc:hover { background-color: #223322; }
+QPushButton#btn_edit_enc {
+    background-color: #1a1a2a;
+    border-color: #2a2a5a;
+    color: #7a9aee;
+    font-size: 13px;
+}
+QPushButton#btn_edit_enc:hover { background-color: #222233; }
+QPushButton#btn_remove_enc {
+    background-color: #2a1a1a;
+    border-color: #5a2a2a;
+    color: #dd6d6d;
+    font-size: 13px;
+    font-weight: 700;
+}
+QPushButton#btn_remove_enc:hover { background-color: #332222; }
 
 /* ── Log ── */
 QFrame#log_frame {
