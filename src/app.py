@@ -297,7 +297,7 @@ class SteamingStreamApp(QApplication):
     def __init__(self, argv):
         super().__init__(argv)
         self.setApplicationName("STEAMING STREAM")
-        self.setApplicationVersion("0.1.0")
+        self.setApplicationVersion("0.2.0")
 
         self._apply_dark_palette()
         self.setStyleSheet(DARK_STYLESHEET)

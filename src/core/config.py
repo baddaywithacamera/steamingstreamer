@@ -32,6 +32,12 @@ class EncoderConfig:
     stream_id:        int  = 1         # Shoutcast 2 / MRS Stream ID (SID)
     password:         str  = ""
     server_type:      str  = "shoutcast2" # "icecast" | "shoutcast1" | "shoutcast2"
+    source_sample_rate: int = 0        # Capture rate (set at runtime); 0 = same as sample_rate
+    source_channels:    int = 0        # Capture channels (set at runtime); 0 = same as channels config
+    station_name:     str  = ""        # Stream/station name sent to server on connect
+    genre:            str  = ""        # Genre sent to server on connect
+    url:              str  = ""        # Station URL sent to server on connect
+    description:      str  = ""        # Stream description (informational)
     auto_reconnect:   bool = True
     reconnect_delay:  int  = 5           # seconds
     reconnect_max:    int  = 0           # 0 = infinite
@@ -82,6 +88,8 @@ class AppSettings:
     window_y:           int  = -1
     window_w:           int  = 660
     window_h:           int  = 340
+    dock_state:         str  = ""    # kept for backward compat (unused)
+    splitter_state:     str  = ""   # base64 QSplitter sizes (main_window)
 
 
 # ---------------------------------------------------------------------------

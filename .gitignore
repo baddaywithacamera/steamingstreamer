@@ -2,6 +2,31 @@
 design/
 docs/reference/
 
+# Private spec / planning documents — stay off the public repo
+*.docx
+squirrel-fm-suite-master-spec-v01.docx
+
+# Third-party reference source (checked out locally for protocol research)
+Netshout/
+butt-*/
+
+# Protocol reference HTML snapshots (local research material)
+SHOUTcast*
+*_files/
+
+# Audio tool and codec binaries — not distributed via git
+ffmpeg.exe
+ffprobe.exe
+flac.exe
+lame.exe
+oggenc2.exe
+opusenc.exe
+pcmraw.exe
+*.dll
+
+# Miscellaneous scratch files
+SEND
+
 # Python
 __pycache__/
 *.py[cod]

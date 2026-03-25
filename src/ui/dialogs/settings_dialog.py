@@ -219,6 +219,13 @@ class SettingsDialog(QDialog):
 
         form.addRow(_sep())
 
+        self.cmb_meter_style = QComboBox()
+        self.cmb_meter_style.addItem("Rectangular LED bars",  "led")
+        self.cmb_meter_style.addItem("Round dot matrix",      "dot")
+        self.cmb_meter_style.addItem("Analog VU needle",      "vu")
+        self.cmb_meter_style.setFixedWidth(160)
+        form.addRow("Meter style:", self.cmb_meter_style)
+
         fps_row = QHBoxLayout()
         self.spn_fps = QSpinBox()
         self.spn_fps.setRange(10, 60)
@@ -309,6 +316,9 @@ class SettingsDialog(QDialog):
         self.chk_autoconnect.setChecked(g.auto_connect)
         self.chk_start_boot.setChecked(g.start_on_boot)
         self.chk_start_min.setChecked(g.start_minimized)
+        style_idx = self.cmb_meter_style.findData(g.meter_style)
+        if style_idx >= 0:
+            self.cmb_meter_style.setCurrentIndex(style_idx)
         self.spn_fps.setValue(g.meter_fps)
         ll_idx = self.cmb_log_level.findText(g.log_level)
         if ll_idx >= 0:
@@ -348,11 +358,12 @@ class SettingsDialog(QDialog):
         m.fallback_text = self.inp_fallback.text().strip() or "Steaming Stream"
 
         # General
-        g.auto_connect   = self.chk_autoconnect.isChecked()
-        g.start_on_boot  = self.chk_start_boot.isChecked()
+        g.auto_connect    = self.chk_autoconnect.isChecked()
+        g.start_on_boot   = self.chk_start_boot.isChecked()
         g.start_minimized = self.chk_start_min.isChecked()
-        g.meter_fps      = self.spn_fps.value()
-        g.log_level      = self.cmb_log_level.currentText()
+        g.meter_style     = self.cmb_meter_style.currentData()
+        g.meter_fps       = self.spn_fps.value()
+        g.log_level       = self.cmb_log_level.currentText()
 
         # API
         g.http_api_enabled   = self.chk_api_enabled.isChecked()

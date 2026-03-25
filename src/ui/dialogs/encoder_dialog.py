@@ -381,6 +381,12 @@ class EncoderDialog(QDialog):
         self.inp_mount.setText(enc.mount)
         self.spn_stream_id.setValue(getattr(enc, "stream_id", 1))
 
+        # Station Info tab
+        self.inp_station_name.setText(getattr(enc, "station_name", ""))
+        self.inp_genre.setText(getattr(enc, "genre", ""))
+        self.inp_station_url.setText(getattr(enc, "url", ""))
+        self.inp_description.setText(getattr(enc, "description", ""))
+
         # Server type — also triggers SID/mount visibility
         for i in range(self.cmb_server_type.count()):
             if self.cmb_server_type.itemData(i) == enc.server_type:
@@ -424,7 +430,7 @@ class EncoderDialog(QDialog):
         enc.mount           = self.inp_mount.text().strip() or "/live"
         enc.stream_id       = self.spn_stream_id.value()
         enc.server_type     = self.cmb_server_type.currentData() or "shoutcast2"
-        enc.password        = self.inp_password.text()
+        enc.password        = self.inp_password.text().strip()
         enc.format          = self.cmb_format.currentText()
         enc.bitrate         = int(self.cmb_bitrate.currentText())
         enc.sample_rate     = int(self.cmb_sample_rate.currentText())
@@ -433,6 +439,13 @@ class EncoderDialog(QDialog):
         enc.reconnect_delay = self.spn_reconnect_delay.value()
         enc.reconnect_max   = self.spn_reconnect_max.value()
         enc.public_directory = self.chk_public.isChecked()
+
+        # Station Info tab
+        enc.station_name = self.inp_station_name.text().strip()
+        enc.genre        = self.inp_genre.text().strip()
+        enc.url          = self.inp_station_url.text().strip()
+        enc.description  = self.inp_description.text().strip()
+
         self.accept()
 
     def get_encoder(self) -> EncoderConfig:

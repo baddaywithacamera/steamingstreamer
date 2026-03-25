@@ -23,15 +23,17 @@ Chassis layout:
   └─────────────────────────────────────────────────────┴────┘
 """
 
+import base64
 import math
 import os
 import platform
 import random
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QObject, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QByteArray, QObject, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -44,6 +46,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QSizePolicy,
+    QSplitter,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -59,6 +62,8 @@ from src.api.http_api import HttpApi
 from src.ui.dialogs.encoder_dialog import EncoderDialog
 from src.ui.dialogs.settings_dialog import SettingsDialog
 from src.ui.widgets.led_meter import StereoMeter
+from src.ui.widgets.vu_needle import StereoVUMeter
+from src.ui.widgets.dot_meter import StereoDotMeter
 from src.ui.widgets.toggle_switch import ToggleSwitch
 
 
@@ -127,25 +132,49 @@ class EncoderStatus:
 # Right-side meter panel
 # ---------------------------------------------------------------------------
 
-class MeterPanel(QWidget):
-    """Stereo LED meters — full height, no buttons."""
+def _make_meter(style: str, parent=None):
+    """Factory: return the right stereo meter widget for the given style key."""
+    if style == "vu":
+        return StereoVUMeter(parent)
+    if style == "dot":
+        return StereoDotMeter(parent)
+    return StereoMeter(parent)   # default: rectangular LED
 
-    def __init__(self, parent=None):
+
+class MeterPanel(QWidget):
+    """Stereo meter panel — style is swappable at runtime; orientation follows dock area."""
+
+    def __init__(self, style: str = "led", parent=None):
         super().__init__(parent)
-        self.setMinimumWidth(44)
-        self.setMaximumWidth(160)
+        self.setMinimumWidth(60)
         self.setObjectName("meter_panel")
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
         )
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 6, 4, 6)
-        layout.setSpacing(0)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(1, 1, 1, 1)
+        self._layout.setSpacing(0)
 
-        # Stereo meter — full height
-        self.meter = StereoMeter(self)
-        layout.addWidget(self.meter, stretch=1)
+        self.meter = _make_meter(style, self)
+        self._layout.addWidget(self.meter, stretch=1)
+
+    def set_style(self, style: str) -> None:
+        """Hot-swap the meter widget. Called when the user changes style in Settings."""
+        orientation = getattr(self.meter, '_orientation', 'vertical')
+        if self.meter:
+            self._layout.removeWidget(self.meter)
+            self.meter.deleteLater()
+        self.meter = _make_meter(style, self)
+        self._layout.addWidget(self.meter, stretch=1)
+        # Re-apply orientation to newly created meter
+        if hasattr(self.meter, 'set_orientation'):
+            self.meter.set_orientation(orientation)
+
+    def set_orientation(self, orientation: str) -> None:
+        """Pass orientation hint to the current meter (LED/dot rotate; VU auto-adapts)."""
+        if hasattr(self.meter, 'set_orientation'):
+            self.meter.set_orientation(orientation)
 
 
 # ---------------------------------------------------------------------------
@@ -198,10 +227,11 @@ class EncoderTable(QTableWidget):
         row = self.rowCount()
         self.insertRow(row)
 
-        # Enabled checkbox (centred)
+        # Enabled checkbox (centred) — toggling writes back to enc.enabled immediately
         chk = QCheckBox()
         chk.setChecked(enc.enabled)
         chk.setObjectName(f"enc_chk_{enc.id}")
+        chk.toggled.connect(lambda checked, e=enc: setattr(e, "enabled", checked))
         cell_widget = QWidget()
         cell_layout = QHBoxLayout(cell_widget)
         cell_layout.addWidget(chk)
@@ -350,26 +380,42 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
 
-        root = QHBoxLayout(central)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        # Left column — everything except meters
+        # Horizontal splitter: controls left | meters right
+        self._splitter = QSplitter(Qt.Orientation.Horizontal, central)
+        self._splitter.setHandleWidth(4)
+        self._splitter.setChildrenCollapsible(False)
+        outer.addWidget(self._splitter)
+
+        # Left pane — everything except meters
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(0)
-
         left_layout.addWidget(self._build_source_bar())
         left_layout.addWidget(self._build_encoder_table(), stretch=1)
         left_layout.addWidget(self._build_now_playing())
         left_layout.addWidget(self._build_button_bar())
+        self._splitter.addWidget(left)
 
-        # Right column — meters (full height, no buttons)
-        self.meter_panel = MeterPanel(self)
+        # Right pane — meter panel (fills all space, resizable by dragging splitter)
+        self.meter_panel = MeterPanel(self._config.settings.meter_style)
+        self.meter_panel.setMinimumWidth(60)
+        self._splitter.addWidget(self.meter_panel)
 
-        root.addWidget(left, stretch=5)
-        root.addWidget(self.meter_panel, stretch=1)
+        # Default sizes: controls get 480px, meters get 160px on first run
+        self._splitter.setSizes([480, 160])
+        # Restore saved splitter position
+        if self._config.settings.splitter_state:
+            try:
+                self._splitter.restoreState(
+                    QByteArray(base64.b64decode(self._config.settings.splitter_state))
+                )
+            except Exception:
+                pass
 
         # Menu bar
         self._build_menu()
@@ -682,9 +728,14 @@ class MainWindow(QMainWindow):
         self._slots = []
         enabled_encoders = [e for e in self._config.encoders if e.enabled]
 
+        # Determine actual device channel count before building encoder slots
+        dev_channels = min(dev_data.channels, 2) if dev_data is not None and dev_data.channels > 0 else src.channels
+
         for enc in enabled_encoders:
-            # Per-encoder sample rate comes from encoder config (not source)
-            enc.sample_rate = src.sample_rate  # sync from global source settings
+            # Store the capture rate/channels separately so FFmpeg knows the real
+            # input spec. enc.sample_rate stays as the user-configured OUTPUT rate.
+            enc.source_sample_rate = src.sample_rate
+            enc.source_channels    = dev_channels
 
             slot = EncoderSlot(
                 config=enc,
@@ -694,8 +745,7 @@ class MainWindow(QMainWindow):
             self._audio_engine.add_slot(slot)
             self._slots.append(slot)
 
-        # Start audio engine — use device's actual channel count, capped at 2
-        dev_channels = min(dev_data.channels, 2) if dev_data is not None and dev_data.channels > 0 else src.channels
+        # Start audio engine
         try:
             self._audio_engine.start(
                 device_index=device_index,
@@ -734,6 +784,8 @@ class MainWindow(QMainWindow):
         # Update UI state
         self._set_broadcasting_ui(True)
         self._stats_timer.start()
+        # Fire one immediate stats poll after a short delay (give slots time to connect)
+        QTimer.singleShot(8_000, self._poll_stats)
         self._log("▶  Starting all encoders…")
 
     def _on_stop_all(self) -> None:
@@ -817,17 +869,26 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _poll_stats(self) -> None:
-        """Called every 30 s while running to fetch listener counts."""
+        """Called every 30 s — dispatches HTTP fetches to a background thread."""
+        slots = [s for s in self._slots if s.status == "connected"]
+        if slots:
+            threading.Thread(
+                target=self._fetch_stats_bg, args=(slots,), daemon=True
+            ).start()
+
+    def _fetch_stats_bg(self, slots: list) -> None:
+        """Background thread: fetch listener counts and emit results via signals."""
         total = 0
-        for slot in self._slots:
-            if slot.status == "connected":
-                stats = slot.fetch_stats()
-                listeners = stats.get("listeners", -1)
-                peak      = stats.get("peak", -1)
-                if listeners >= 0:
-                    total += listeners
-                self._sig.stats_update.emit(slot.encoder_id, listeners, peak)
-        self._update_title(total)
+        for slot in slots:
+            stats     = slot.fetch_stats()
+            listeners = stats.get("listeners", -1)
+            peak      = stats.get("peak", -1)
+            if listeners >= 0:
+                total += listeners
+            self._sig.stats_update.emit(slot.encoder_id, listeners, peak)
+        # _update_title must run on the UI thread — route through a no-op signal
+        # by emitting a stats_update that the handler will also use to refresh title
+        self._sig.stats_update.emit("__total__", total, -1)
 
     # ------------------------------------------------------------------
     # Signal handlers (run on main/Qt thread)
@@ -856,7 +917,10 @@ class MainWindow(QMainWindow):
             slot.update_metadata(title)
 
     def _on_stats_update(self, enc_id: str, listeners: int, peak: int) -> None:
-        self.encoder_table.update_stats(enc_id, listeners, peak)
+        if enc_id == "__total__":
+            self._update_title(listeners)
+        else:
+            self.encoder_table.update_stats(enc_id, listeners, peak)
 
     # ------------------------------------------------------------------
     # Master toggle (follows start/stop state)
@@ -912,7 +976,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(shortcuts)
 
         note = QLabel(
-            "⚠  Features in progress: analog VU meters, spectrum analyzer, "
+            "⚠  Features in progress: spectrum analyzer, "
             "system tray, TUNE/TWERKER playout integration."
         )
         note.setStyleSheet("color: #666; font-size: 10px; font-style: italic;")
@@ -940,6 +1004,8 @@ class MainWindow(QMainWindow):
             self._populate_source_devices()
             self._log("Settings saved.")
             self._save_config()
+            # Apply meter style change immediately (hot-swap the widget)
+            self.meter_panel.set_style(self._config.settings.meter_style)
 
         if was_running:
             self._on_start_all()
@@ -1022,11 +1088,12 @@ class MainWindow(QMainWindow):
             self._on_stop_all()
         self._stop_monitor()
         self._log_dialog.hide()
-        # Persist window geometry
+        # Persist window geometry and splitter layout
         s = self._config.settings
         s.window_x = self.x()
         s.window_y = self.y()
         s.window_w = self.width()
         s.window_h = self.height()
+        s.splitter_state = base64.b64encode(self._splitter.saveState().data()).decode()
         self._save_config()
         event.accept()

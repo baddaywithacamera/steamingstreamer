@@ -15,6 +15,7 @@ FFmpeg must be on PATH or at the path returned by ffmpeg_path().
 
 from __future__ import annotations
 
+import os
 import queue
 import shutil
 import subprocess
@@ -32,6 +33,7 @@ except ImportError:
     REQUESTS_AVAILABLE = False
 
 from src.core.config import EncoderConfig
+from src.core.sc2_client import SC2Client, SC2Error, SC2StreamInUse
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +63,25 @@ def ffmpeg_path() -> str:
     raise FileNotFoundError(
         "ffmpeg not found. Install FFmpeg and make sure it is on your PATH."
     )
+
+
+def _probe_fdk() -> bool:
+    """Check once at import time whether libfdk_aac is compiled into FFmpeg."""
+    try:
+        result = subprocess.run(
+            [ffmpeg_path(), "-hide_banner", "-encoders"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return "libfdk_aac" in result.stdout
+    except Exception:
+        return False
+
+
+# Cached once at startup — calling ffmpeg on every connect would be wasteful
+try:
+    _FDK_AVAILABLE: bool = _probe_fdk()
+except Exception:
+    _FDK_AVAILABLE = False
 
 
 # ---------------------------------------------------------------------------
@@ -99,11 +120,14 @@ class EncoderSlot:
         self._on_log            = on_log
 
         self._proc:              Optional[subprocess.Popen] = None
+        self._sc2:               Optional[SC2Client]        = None   # live SC2 connection
         self._write_q:           queue.Queue                = queue.Queue(maxsize=self._QUEUE_SIZE)
         self._writer_thread:     Optional[threading.Thread] = None
         self._monitor_thread:    Optional[threading.Thread] = None
+        self._relay_thread:      Optional[threading.Thread] = None   # SC2 stdout → socket
         self._running:           bool                       = False
         self._reconnect_count:   int                        = 0
+        self._reconnecting:      bool                       = False  # guard against concurrent reconnects
         self._status:            str                        = SlotStatus.IDLE
 
     # ------------------------------------------------------------------
@@ -125,7 +149,11 @@ class EncoderSlot:
             return
         self._running = True
         self._reconnect_count = 0
-        self._connect()
+        # Run _connect() on a background thread so the UI never blocks on the
+        # socket handshake (10-second TCP timeout would freeze the main window).
+        threading.Thread(
+            target=self._connect, daemon=True, name=f"connect-{self._cfg.id}"
+        ).start()
 
     def stop(self) -> None:
         self._running = False
@@ -134,12 +162,19 @@ class EncoderSlot:
             self._write_q.put_nowait(None)
         except queue.Full:
             pass
-        self._kill_ffmpeg()
         self._set_status(SlotStatus.IDLE)
+        # Kill on a background thread — proc.wait() must not block the UI thread.
+        threading.Thread(
+            target=self._kill_ffmpeg, daemon=True, name=f"stop-{self._cfg.id}"
+        ).start()
 
     def feed(self, pcm: bytes) -> None:
-        """Deliver a PCM chunk. Drops silently if queue is full."""
-        if self._status == SlotStatus.CONNECTED:
+        """Deliver a PCM chunk. Drops silently if queue is full.
+
+        Accepted during CONNECTING as well as CONNECTED so that FFmpeg is
+        already encoding while the SC2 handshake is in progress.
+        """
+        if self._status in (SlotStatus.CONNECTED, SlotStatus.CONNECTING):
             try:
                 self._write_q.put_nowait(pcm)
             except queue.Full:
@@ -164,6 +199,102 @@ class EncoderSlot:
 
     def _connect(self) -> None:
         self._set_status(SlotStatus.CONNECTING)
+        c = self._cfg
+
+        if c.server_type == "shoutcast2":
+            self._connect_sc2()
+        else:
+            self._connect_ffmpeg_icecast()
+
+    def _connect_sc2(self) -> None:
+        """SC2 / MRS path: uvox handshake in Python, FFmpeg outputs ADTS to stdout.
+
+        Order matters: FFmpeg must be running and fed PCM *before* the SC2
+        handshake completes so encoded audio is ready the instant we enter
+        DATA_MODE.  MRS drops the connection if no audio arrives within ~2-3 s
+        of the DATA_MODE ACK — and FFmpeg itself takes 1-2 s to initialize.
+        """
+        c = self._cfg
+        sid = getattr(c, "stream_id", 1)
+
+        # MRS SIDs are configured as AAC+ streams — always declare audio/aacp.
+        # ADTS-framed AAC-LC is valid aacp content (base layer without SBR).
+        # Sending audio/aac to an aacp SID causes the server to drop the feed.
+        if c.format == "MP3":
+            mime = "audio/mpeg"
+        else:
+            mime = "audio/aacp"   # AAC-LC or HE-AAC both declare aacp for MRS
+
+        # ── 1. Launch FFmpeg FIRST so it is warm and has encoded frames
+        #       buffered in its stdout pipe by the time we enter DATA_MODE.
+        cmd = self._build_ffmpeg_cmd_sc2()
+        try:
+            self._proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,   # capture encoded audio
+                stderr=subprocess.PIPE,
+                bufsize=0,
+            )
+        except Exception as exc:
+            self._log(f"[{c.name}] FFmpeg start failed: {exc}")
+            self._set_status(SlotStatus.ERROR)
+            self._maybe_reconnect()
+            return
+
+        # Start writer immediately — PCM flows into FFmpeg during the handshake.
+        # feed() accepts chunks in both CONNECTING and CONNECTED states.
+        self._writer_thread = threading.Thread(
+            target=self._writer_loop, daemon=True, name=f"writer-{c.id}")
+        self._writer_thread.start()
+
+        # ── 2. SC2 handshake (FFmpeg is encoding in the background) ───
+        sc2 = SC2Client(
+            host          = c.server,
+            port          = c.port,
+            password      = c.password,
+            sid           = sid,
+            name          = c.station_name or c.name,
+            genre         = c.genre,
+            url           = c.url,
+            content_type  = mime,
+            sample_rate   = c.sample_rate,
+            bitrate_kbps  = c.bitrate,
+        )
+        try:
+            sc2.connect()
+            self._sc2 = sc2
+        except SC2StreamInUse as exc:
+            self._log(f"[{c.name}] SC2 stream in use — waiting 35s for server to release SID {sid}…")
+            sc2.close()
+            self._kill_ffmpeg()
+            self._set_status(SlotStatus.ERROR)
+            self._maybe_reconnect(delay_override=35)
+            return
+        except (SC2Error, OSError) as exc:
+            self._log(f"[{c.name}] SC2 handshake failed: {exc}")
+            sc2.close()
+            self._kill_ffmpeg()
+            self._set_status(SlotStatus.ERROR)
+            self._maybe_reconnect()
+            return
+
+        self._log(f"[{c.name}] Connected (SC2 uvox, SID {sid})")
+        self._set_status(SlotStatus.CONNECTED)
+        self._reconnect_count = 0
+
+        # Relay starts here — FFmpeg has been encoding for the duration of the
+        # handshake (~0.5-1 s), so the stdout pipe already has audio queued.
+        self._relay_thread = threading.Thread(
+            target=self._relay_loop, daemon=True, name=f"relay-{c.id}")
+        self._relay_thread.start()
+
+        self._monitor_thread = threading.Thread(
+            target=self._monitor_loop, daemon=True, name=f"monitor-{c.id}")
+        self._monitor_thread.start()
+
+    def _connect_ffmpeg_icecast(self) -> None:
+        """Icecast / Shoutcast 1 path: FFmpeg handles streaming directly."""
         try:
             cmd = self._build_ffmpeg_cmd()
             self._log(f"[{self._cfg.name}] Starting: {' '.join(cmd[:6])}…")
@@ -211,34 +342,35 @@ class EncoderSlot:
             except queue.Empty:
                 continue
             except (BrokenPipeError, OSError):
+                # Pipe broke — FFmpeg died or was killed.  The relay loop will
+                # detect the EOF on stdout and handle the reconnect; don't
+                # trigger a second concurrent reconnect from here.
                 self._log(f"[{self._cfg.name}] Write error — pipe broken.")
-                self._set_status(SlotStatus.ERROR)
-                self._maybe_reconnect()
                 break
 
     def _monitor_loop(self) -> None:
-        """Read FFmpeg stderr; detect unexpected exit."""
+        """Read FFmpeg stderr; log output only."""
         if not self._proc:
             return
         for raw_line in self._proc.stderr:
             line = raw_line.decode("utf-8", errors="replace").strip()
             if line:
                 self._log(f"[{self._cfg.name}] {line}")
-        # Process exited
-        if self._running and self._status == SlotStatus.CONNECTED:
-            self._log(f"[{self._cfg.name}] Stream process exited unexpectedly.")
-            self._set_status(SlotStatus.ERROR)
-            self._maybe_reconnect()
+        # FFmpeg exited — the relay loop will see EOF on stdout and reconnect.
+        # Don't call _maybe_reconnect() here; that would race with the relay.
 
-    def _maybe_reconnect(self) -> None:
+    def _maybe_reconnect(self, delay_override: int = 0) -> None:
         if not self._running or not self._cfg.auto_reconnect:
             return
+        if self._reconnecting:
+            return   # already queued — don't pile up concurrent reconnects
         max_a = self._cfg.reconnect_max
         if max_a > 0 and self._reconnect_count >= max_a:
             self._log(f"[{self._cfg.name}] Max reconnect attempts reached.")
             return
+        self._reconnecting = True
         self._reconnect_count += 1
-        delay = self._cfg.reconnect_delay
+        delay = delay_override if delay_override > 0 else self._cfg.reconnect_delay
         self._log(
             f"[{self._cfg.name}] Reconnecting in {delay}s "
             f"(attempt {self._reconnect_count}"
@@ -246,12 +378,70 @@ class EncoderSlot:
         )
         def _delayed():
             time.sleep(delay)
+            self._reconnecting = False   # ← clear flag so future drops can reconnect
             if self._running:
                 self._kill_ffmpeg()
                 self._connect()
         threading.Thread(target=_delayed, daemon=True).start()
 
+    def _relay_loop(self) -> None:
+        """SC2 path: read encoded ADTS bytes from FFmpeg stdout, send to SC2 socket.
+
+        Rate-limited to the configured bitrate.  Without this, pre-buffered audio
+        (encoded during the SC2 handshake) floods the server at startup: the server
+        enforces a bitrate window and drops the connection when it receives data
+        significantly faster than the declared bitrate.
+        """
+        proc = self._proc
+        sc2  = self._sc2
+        name = self._cfg.name
+        if not proc or not sc2:
+            return
+
+        # Bytes-per-second budget at the configured bitrate
+        bps        = (self._cfg.bitrate * 1000) / 8.0
+        t_start    = time.monotonic()
+        sent_bytes = 0
+
+        try:
+            fd = proc.stdout.fileno()
+            while self._running and proc and sc2:
+                chunk = os.read(fd, 4096)
+                if not chunk:
+                    break
+                try:
+                    sc2.send_audio(chunk)
+                    sent_bytes += len(chunk)
+
+                    # Throttle: if we're ahead of the bitrate budget, sleep it off.
+                    elapsed = time.monotonic() - t_start
+                    surplus = sent_bytes - bps * elapsed
+                    if surplus > 0:
+                        wait = surplus / bps
+                        if wait > 0.005:
+                            time.sleep(min(wait, 0.5))
+
+                except OSError as exc:
+                    self._log(f"[{name}] SC2 send error: {exc}")
+                    break
+        except Exception as exc:
+            self._log(f"[{name}] SC2 relay error: {exc}")
+        finally:
+            if self._running:
+                self._log(f"[{name}] SC2 relay ended — triggering reconnect")
+                self._set_status(SlotStatus.ERROR)
+                self._maybe_reconnect()
+
     def _kill_ffmpeg(self) -> None:
+        # Close SC2 socket first so the relay thread unblocks
+        sc2 = self._sc2
+        self._sc2 = None
+        if sc2:
+            try:
+                sc2.close()
+            except Exception:
+                pass
+
         proc = self._proc
         self._proc = None          # clear first to prevent race
         if proc:
@@ -260,16 +450,81 @@ class EncoderSlot:
             except Exception:
                 pass
             try:
-                proc.wait(timeout=3)
+                proc.stdout.close()
             except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
+                pass
+            try:
+                proc.kill()        # SIGKILL — don't wait for graceful exit
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=2)   # reap the zombie; fast after kill
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
-    # FFmpeg command builder
+    # FFmpeg command builders
     # ------------------------------------------------------------------
+
+    def _build_ffmpeg_cmd_sc2(self) -> list[str]:
+        """FFmpeg command for SC2: encode to ADTS and write to stdout (pipe:1).
+        The SC2 relay thread picks it up and sends it through the uvox socket.
+        No icecast muxer, no URL — pure encode-only.
+        """
+        c       = self._cfg
+        out_ch  = 2 if c.channels == "stereo" else 1
+        in_ch   = c.source_channels or out_ch   # actual PCM channel count from device
+        in_rate = c.source_sample_rate or c.sample_rate
+        out_rate = c.sample_rate
+
+        # Native AAC needs ≥32 kbps per channel — auto-downmix to mono when too low
+        if c.format in ("AAC", "AAC+") and not self._fdk_available():
+            if out_ch == 2 and c.bitrate < 64:
+                out_ch = 1
+                self._log(f"[{c.name}] Native AAC: {c.bitrate}k stereo too low — using mono")
+
+        # INPUT spec must match actual PCM from the audio engine (in_ch / in_rate).
+        # OUTPUT flags (after -i) tell FFmpeg the desired encode rate/channels,
+        # triggering resampling and downmix automatically as needed.
+        cmd = [
+            ffmpeg_path(),
+            "-hide_banner", "-loglevel", "warning",
+            "-f",  "s16le",
+            "-ar", str(in_rate),   # actual capture sample rate
+            "-ac", str(in_ch),     # actual capture channel count
+            "-i",  "pipe:0",
+        ]
+
+        # Output conversion flags (only add when different from input)
+        if out_rate != in_rate:
+            cmd += ["-ar", str(out_rate)]
+        if out_ch != in_ch:
+            cmd += ["-ac", str(out_ch)]
+
+        if c.format == "AAC+" and self._fdk_available():
+            # HE-AAC v2 (SBR + Parametric Stereo) for stereo < 48 kbps — matches
+            # RadioCaster / BUTT profile selection (BUTT aac_encode.cpp: aot=29 for <48k).
+            # HE-AAC v1 (SBR only) for higher bitrates or mono.
+            if out_ch == 2 and c.bitrate < 48:
+                he_profile = "aac_he_v2"
+            else:
+                he_profile = "aac_he"
+            cmd += ["-c:a", "libfdk_aac", "-profile:a", he_profile,
+                    "-b:a", f"{c.bitrate}k"]
+        elif c.format == "AAC" and self._fdk_available():
+            # fdk AAC-LC — better quality than native aac, handles low bitrates cleanly
+            cmd += ["-c:a", "libfdk_aac", "-b:a", f"{c.bitrate}k"]
+        elif c.format in ("AAC", "AAC+"):
+            cmd += ["-c:a", "aac", "-b:a", f"{c.bitrate}k"]
+        else:  # MP3
+            cmd += ["-c:a", "libmp3lame", "-b:a", f"{c.bitrate}k", "-q:a", "0"]
+
+        # Container format must match the codec
+        if c.format == "MP3":
+            cmd += ["-f", "mp3", "pipe:1"]
+        else:
+            cmd += ["-f", "adts", "pipe:1"]
+        return cmd
 
     def _build_ffmpeg_cmd(self) -> list[str]:
         c = self._cfg
@@ -287,8 +542,13 @@ class EncoderSlot:
 
         # Encoder
         if c.format == "AAC+":
-            # HE-AAC (AAC+ / SBR) — dramatically better than plain AAC at low bitrates
-            cmd += ["-c:a", "aac", "-profile:a", "aac_he", "-b:a", f"{c.bitrate}k"]
+            # HE-AAC (AAC+ / SBR) — use libfdk_aac if available, else native aac
+            # Native FFmpeg AAC encoder does not support aac_he profile in most builds
+            if self._fdk_available():
+                cmd += ["-c:a", "libfdk_aac", "-profile:a", "aac_he", "-b:a", f"{c.bitrate}k"]
+            else:
+                # Fall back: native AAC at the requested bitrate, still tagged as aacp
+                cmd += ["-c:a", "aac", "-b:a", f"{c.bitrate}k"]
             fmt  = "adts"
             mime = "audio/aacp"   # SC2/MRS expects aacp not aac for HE-AAC streams
         elif c.format == "AAC":
@@ -305,9 +565,9 @@ class EncoderSlot:
         url = self._build_output_url()
 
         # Server-type-specific flags
-        # MRS / Shoutcast 2 still needs legacy SOURCE method — PUT is rejected immediately
+        # SC1 needs legacy SOURCE method; SC2 never reaches here (uses _connect_sc2)
         extra: list[str] = []
-        if c.server_type in ("shoutcast1", "shoutcast2"):
+        if c.server_type == "shoutcast1":
             extra += ["-legacy_icecast", "1"]
 
         cmd += extra + [
@@ -332,9 +592,9 @@ class EncoderSlot:
             return f"icecast://source:{c.password}@{c.server}:{c.port}/"
 
         else:
-            # Shoutcast 2 / MRS: route by Stream ID (SID), not mount path
-            sid = getattr(c, "stream_id", 1)
-            return f"icecast://source:{c.password}@{c.server}:{c.port}/{sid}"
+            # shoutcast2: should never reach here — handled by _connect_sc2()
+            # Fallback just in case
+            return f"icecast://source:{c.password}@{c.server}:{c.port}/"
 
     # ------------------------------------------------------------------
     # Metadata HTTP push
@@ -370,7 +630,8 @@ class EncoderSlot:
     def fetch_stats(self) -> dict:
         """
         Return {'listeners': int, 'peak': int, 'title': str} or empty dict on fail.
-        Shoutcast 2: GET /admin.cgi?mode=viewxml&page=3
+        Shoutcast 2: GET /admin.cgi?mode=viewxml&page=2&sid=X  (stream stats)
+        page=3 is the per-listener list — no aggregate count tags there.
         """
         if not REQUESTS_AVAILABLE:
             return {}
@@ -385,15 +646,27 @@ class EncoderSlot:
                 return {}
             else:
                 url = f"http://{c.server}:{c.port}/admin.cgi"
-                params = {"mode": "viewxml", "page": "3", "pass": c.password}
+                sid = getattr(c, "stream_id", 1)
+                params = {"mode": "viewxml", "page": "2", "sid": sid, "pass": c.password}
                 r = requests.get(url, params=params, timeout=3)
-                return _parse_shoutcast_xml(r.text)
-        except Exception:
+                result = _parse_shoutcast_xml(r.text)
+                if "listeners" not in result:
+                    # Log the raw response so we know what MRS is actually returning
+                    preview = r.text[:400].replace("\n", " ").replace("\r", "")
+                    self._log(f"[{c.name}] Stats XML (no listener tag): HTTP {r.status_code} — {preview}")
+                return result
+        except Exception as exc:
+            self._log(f"[{c.name}] Stats fetch failed: {exc}")
             return {}
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _fdk_available() -> bool:
+        """Return True if this FFmpeg build includes libfdk_aac (cached)."""
+        return _FDK_AVAILABLE
 
     def _set_status(self, status: str) -> None:
         self._status = status
@@ -410,15 +683,48 @@ class EncoderSlot:
 # ---------------------------------------------------------------------------
 
 def _parse_shoutcast_xml(xml: str) -> dict:
-    """Extract listener counts from Shoutcast admin.cgi viewxml response."""
+    """Extract listener counts from Shoutcast admin.cgi viewxml response.
+
+    Handles both SHOUTcast DNAS 2 and MRS tag naming conventions.
+    MRS wraps per-stream data inside <STREAM> elements; we scan the whole
+    document with IGNORECASE so both ALLCAPS and lowercase variants match.
+    """
     import re
     result = {}
-    for tag, key in (
-        (r"<CURRENTLISTENERS>(\d+)</CURRENTLISTENERS>", "listeners"),
-        (r"<PEAKLISTENERS>(\d+)</PEAKLISTENERS>",       "peak"),
-        (r"<SONGTITLE>(.*?)</SONGTITLE>",               "title"),
+
+    # Listener count — try standard DNAS tag first, then MRS variants
+    for pattern in (
+        r"<CURRENTLISTENERS>(\d+)</CURRENTLISTENERS>",
+        r"<currentlisteners>(\d+)</currentlisteners>",
+        r"<LISTENERS>(\d+)</LISTENERS>",
+        r"<listeners>(\d+)</listeners>",
     ):
-        m = re.search(tag, xml, re.IGNORECASE)
+        m = re.search(pattern, xml, re.IGNORECASE)
         if m:
-            result[key] = int(m.group(1)) if key != "title" else m.group(1)
+            result["listeners"] = int(m.group(1))
+            break
+
+    # Peak listener count
+    for pattern in (
+        r"<PEAKLISTENERS>(\d+)</PEAKLISTENERS>",
+        r"<MAXLISTENERS>(\d+)</MAXLISTENERS>",
+        r"<peaklisteners>(\d+)</peaklisteners>",
+        r"<maxlisteners>(\d+)</maxlisteners>",
+    ):
+        m = re.search(pattern, xml, re.IGNORECASE)
+        if m:
+            result["peak"] = int(m.group(1))
+            break
+
+    # Song/stream title
+    for pattern in (
+        r"<SONGTITLE>(.*?)</SONGTITLE>",
+        r"<TITLE>(.*?)</TITLE>",
+        r"<STREAMTITLE>(.*?)</STREAMTITLE>",
+    ):
+        m = re.search(pattern, xml, re.IGNORECASE | re.DOTALL)
+        if m:
+            result["title"] = m.group(1).strip()
+            break
+
     return result
