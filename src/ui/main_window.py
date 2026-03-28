@@ -23,7 +23,6 @@ Chassis layout:
   └─────────────────────────────────────────────────────┴────┘
 """
 
-import base64
 import math
 import os
 import platform
@@ -33,7 +32,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QByteArray, QObject, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QObject, QPoint, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -46,7 +45,8 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QSizePolicy,
-    QSplitter,
+    QSlider,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -61,10 +61,11 @@ from src.core.metadata import MetadataWatcher
 from src.api.http_api import HttpApi
 from src.ui.dialogs.encoder_dialog import EncoderDialog
 from src.ui.dialogs.settings_dialog import SettingsDialog
-from src.ui.widgets.led_meter import StereoMeter
-from src.ui.widgets.vu_needle import StereoVUMeter
-from src.ui.widgets.dot_meter import StereoDotMeter
+from src.ui.snap_manager import SnapManager
 from src.ui.widgets.toggle_switch import ToggleSwitch
+from src.ui.windows.meter_window import MeterWindow
+from src.ui.windows.spectrum_window import SpectrumWindow
+from src.ui.windows.eq_window import EQWindow
 
 
 # ---------------------------------------------------------------------------
@@ -126,55 +127,6 @@ class EncoderStatus:
     @classmethod
     def dot(cls, status: str) -> tuple[str, str]:
         return cls._DOTS.get(status, cls._DOTS[cls.IDLE])
-
-
-# ---------------------------------------------------------------------------
-# Right-side meter panel
-# ---------------------------------------------------------------------------
-
-def _make_meter(style: str, parent=None):
-    """Factory: return the right stereo meter widget for the given style key."""
-    if style == "vu":
-        return StereoVUMeter(parent)
-    if style == "dot":
-        return StereoDotMeter(parent)
-    return StereoMeter(parent)   # default: rectangular LED
-
-
-class MeterPanel(QWidget):
-    """Stereo meter panel — style is swappable at runtime; orientation follows dock area."""
-
-    def __init__(self, style: str = "led", parent=None):
-        super().__init__(parent)
-        self.setMinimumWidth(60)
-        self.setObjectName("meter_panel")
-        self.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
-        )
-
-        self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(1, 1, 1, 1)
-        self._layout.setSpacing(0)
-
-        self.meter = _make_meter(style, self)
-        self._layout.addWidget(self.meter, stretch=1)
-
-    def set_style(self, style: str) -> None:
-        """Hot-swap the meter widget. Called when the user changes style in Settings."""
-        orientation = getattr(self.meter, '_orientation', 'vertical')
-        if self.meter:
-            self._layout.removeWidget(self.meter)
-            self.meter.deleteLater()
-        self.meter = _make_meter(style, self)
-        self._layout.addWidget(self.meter, stretch=1)
-        # Re-apply orientation to newly created meter
-        if hasattr(self.meter, 'set_orientation'):
-            self.meter.set_orientation(orientation)
-
-    def set_orientation(self, orientation: str) -> None:
-        """Pass orientation hint to the current meter (LED/dot rotate; VU auto-adapts)."""
-        if hasattr(self.meter, 'set_orientation'):
-            self.meter.set_orientation(orientation)
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +296,12 @@ class MainWindow(QMainWindow):
         self._http_api:       HttpApi | None       = None
         self._running:        bool                 = False
         self._demo_t:         float                = 0.0
+        self._compact:        bool                 = False
+
+        # Satellite windows (created lazily)
+        self._meter_win:    MeterWindow    | None = None
+        self._spectrum_win: SpectrumWindow | None = None
+        self._eq_win:       EQWindow       | None = None
 
         self._build_ui()
         self._populate_source_devices()
@@ -371,57 +329,42 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         self._update_title()
-        self.setMinimumSize(400, 180)
+        self.setMinimumSize(360, 160)
         s = self._config.settings
-        self.resize(max(400, s.window_w), max(180, s.window_h))
+        self.resize(max(360, s.window_w), max(160, s.window_h))
         if s.window_x >= 0 and s.window_y >= 0:
             self.move(s.window_x, s.window_y)
 
-        central = QWidget()
-        self.setCentralWidget(central)
+        # ── Stacked widget: full view (index 0) | compact bar (index 1) ──
+        self._stack = QStackedWidget()
+        self.setCentralWidget(self._stack)
 
-        outer = QVBoxLayout(central)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
+        # ── Full view ─────────────────────────────────────────────────
+        full = QWidget()
+        full_layout = QVBoxLayout(full)
+        full_layout.setContentsMargins(0, 0, 0, 0)
+        full_layout.setSpacing(0)
+        full_layout.addWidget(self._build_source_bar())
+        full_layout.addWidget(self._build_encoder_table(), stretch=1)
+        full_layout.addWidget(self._build_now_playing())
+        full_layout.addWidget(self._build_button_bar())
+        self._stack.addWidget(full)          # index 0
 
-        # Horizontal splitter: controls left | meters right
-        self._splitter = QSplitter(Qt.Orientation.Horizontal, central)
-        self._splitter.setHandleWidth(4)
-        self._splitter.setChildrenCollapsible(False)
-        outer.addWidget(self._splitter)
-
-        # Left pane — everything except meters
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(0)
-        left_layout.addWidget(self._build_source_bar())
-        left_layout.addWidget(self._build_encoder_table(), stretch=1)
-        left_layout.addWidget(self._build_now_playing())
-        left_layout.addWidget(self._build_button_bar())
-        self._splitter.addWidget(left)
-
-        # Right pane — meter panel (fills all space, resizable by dragging splitter)
-        self.meter_panel = MeterPanel(self._config.settings.meter_style)
-        self.meter_panel.setMinimumWidth(60)
-        self._splitter.addWidget(self.meter_panel)
-
-        # Default sizes: controls get 480px, meters get 160px on first run
-        self._splitter.setSizes([480, 160])
-        # Restore saved splitter position
-        if self._config.settings.splitter_state:
-            try:
-                self._splitter.restoreState(
-                    QByteArray(base64.b64decode(self._config.settings.splitter_state))
-                )
-            except Exception:
-                pass
+        # ── Compact bar ───────────────────────────────────────────────
+        self._compact_bar = self._build_compact_bar()
+        self._stack.addWidget(self._compact_bar)   # index 1
 
         # Menu bar
         self._build_menu()
 
         # Floating log dialog (hidden until Ctrl+L)
         self._build_log_dialog()
+
+        # Register with SnapManager so satellite windows can snap to us
+        SnapManager.instance().register(self)
+
+        # Restore + open satellite windows
+        self._open_satellite_windows()
 
         # Stats polling timer (every 30 s while running)
         self._stats_timer = QTimer(self)
@@ -436,7 +379,14 @@ class MainWindow(QMainWindow):
         file_menu.addAction("Quit", self.close)
 
         view_menu = mb.addMenu("View")
-        log_action = view_menu.addAction("Log",  self._on_view_log)
+        view_menu.addAction("Meters",   self._show_meter_window)
+        view_menu.addAction("Spectrum", self._show_spectrum_window)
+        view_menu.addAction("EQ / Effects", self._show_eq_window)
+        view_menu.addSeparator()
+        shade_action = view_menu.addAction("Compact Bar", self._toggle_compact)
+        shade_action.setShortcut(QKeySequence("Ctrl+Shift+W"))
+        view_menu.addSeparator()
+        log_action = view_menu.addAction("Log", self._on_view_log)
         log_action.setShortcut(QKeySequence("Ctrl+L"))
 
         help_menu = mb.addMenu("Help")
@@ -458,6 +408,19 @@ class MainWindow(QMainWindow):
         )
         self.source_combo.setToolTip("Audio input device")
 
+        # Master gain slider  (-20 dB … +12 dB, tenths)
+        gain_lbl = QLabel("GAIN")
+        gain_lbl.setObjectName("section_label")
+        self._gain_slider = QSlider(Qt.Orientation.Horizontal)
+        self._gain_slider.setRange(-200, 120)
+        self._gain_slider.setValue(int(self._config.settings.gain_db * 10))
+        self._gain_slider.setFixedWidth(80)
+        self._gain_slider.setToolTip("Master input gain")
+        self._gain_readout = QLabel(self._fmt_gain(self._config.settings.gain_db))
+        self._gain_readout.setFixedWidth(46)
+        self._gain_readout.setStyleSheet("font-size: 10px; color: #aaa;")
+        self._gain_slider.valueChanged.connect(self._on_gain_changed)
+
         self.master_toggle = ToggleSwitch(initial=False)
         self.master_toggle.toggled.connect(self._on_master_toggle)
 
@@ -467,10 +430,26 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(src_label)
         layout.addWidget(self.source_combo)
+        layout.addWidget(gain_lbl)
+        layout.addWidget(self._gain_slider)
+        layout.addWidget(self._gain_readout)
         layout.addWidget(self.master_toggle)
         layout.addWidget(self.status_label)
 
         return frame
+
+    @staticmethod
+    def _fmt_gain(db: float) -> str:
+        return f"{db:+.1f} dB" if db != 0.0 else "0.0 dB"
+
+    def _on_gain_changed(self, value: int) -> None:
+        db = value / 10.0
+        self._gain_readout.setText(self._fmt_gain(db))
+        self._config.settings.gain_db = db
+        if self._audio_engine:
+            self._audio_engine.set_gain_db(db)
+        if self._monitor:
+            self._monitor.set_gain_db(db)
 
     def _build_encoder_table(self) -> QWidget:
         wrapper = QWidget()
@@ -577,6 +556,146 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.log_view)
 
+    def _build_compact_bar(self) -> QWidget:
+        """Thin status strip shown when window is in compact (windowshade) mode."""
+        bar = QWidget()
+        bar.setFixedHeight(28)
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(8, 0, 8, 0)
+        layout.setSpacing(12)
+
+        self._bar_streams  = QLabel("● 0 streams")
+        self._bar_streams.setStyleSheet("color: #555; font-size: 10px;")
+        self._bar_listeners = QLabel("0 listeners")
+        self._bar_listeners.setStyleSheet("color: #555; font-size: 10px;")
+        self._bar_data     = QLabel("0 kbps")
+        self._bar_data.setStyleSheet("color: #555; font-size: 10px;")
+        self._bar_title    = QLabel("—")
+        self._bar_title.setStyleSheet("color: #777; font-size: 10px;")
+        self._bar_title.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        expand_btn = QPushButton("▲")
+        expand_btn.setFixedSize(20, 20)
+        expand_btn.setToolTip("Expand window")
+        expand_btn.clicked.connect(self._toggle_compact)
+
+        layout.addWidget(self._bar_streams)
+        layout.addWidget(self._bar_listeners)
+        layout.addWidget(self._bar_data)
+        layout.addWidget(self._bar_title)
+        layout.addWidget(expand_btn)
+        return bar
+
+    # ------------------------------------------------------------------
+    # Compact bar toggle
+    # ------------------------------------------------------------------
+
+    def _toggle_compact(self) -> None:
+        self._compact = not self._compact
+        if self._compact:
+            self._full_height = self.height()
+            self._stack.setCurrentIndex(1)
+            self.setFixedHeight(28 + self.menuBar().height())
+        else:
+            self._stack.setCurrentIndex(0)
+            self.setMinimumSize(360, 160)
+            self.setMaximumSize(16777215, 16777215)
+            self.resize(self.width(), getattr(self, "_full_height", 320))
+
+    def _update_compact_bar(self, streams: int, listeners: int, title: str) -> None:
+        dot = "●" if streams > 0 else "○"
+        color = "#00dd00" if streams > 0 else "#555"
+        self._bar_streams.setText(f"<span style='color:{color}'>{dot}</span> {streams} stream{'s' if streams != 1 else ''}")
+        self._bar_listeners.setText(f"{listeners} listener{'s' if listeners != 1 else ''}")
+        self._bar_title.setText(title or "—")
+
+    # ------------------------------------------------------------------
+    # Satellite window management
+    # ------------------------------------------------------------------
+
+    def _open_satellite_windows(self) -> None:
+        """Restore satellite windows that were visible when the app last closed."""
+        s = self._config.settings
+
+        if s.meter_visible:
+            self._show_meter_window()
+            if s.meter_x >= 0 and s.meter_y >= 0:
+                self._meter_win.move(s.meter_x, s.meter_y)
+            self._meter_win.resize(s.meter_w, s.meter_h)
+
+        if s.spectrum_visible:
+            self._show_spectrum_window()
+            if s.spectrum_x >= 0 and s.spectrum_y >= 0:
+                self._spectrum_win.move(s.spectrum_x, s.spectrum_y)
+            self._spectrum_win.resize(s.spectrum_w, s.spectrum_h)
+
+        if s.eq_visible:
+            self._show_eq_window()
+            if s.eq_x >= 0 and s.eq_y >= 0:
+                self._eq_win.move(s.eq_x, s.eq_y)
+            self._eq_win.resize(s.eq_w, s.eq_h)
+
+    def _show_meter_window(self) -> None:
+        if self._meter_win is None:
+            self._meter_win = MeterWindow(
+                style=self._config.settings.meter_style, parent=None
+            )
+            # Position default: right of main window
+            geo = self.frameGeometry()
+            self._meter_win.move(geo.right() + 2, geo.top())
+        self._meter_win.show()
+        self._meter_win.raise_()
+
+    def _show_spectrum_window(self) -> None:
+        if self._spectrum_win is None:
+            self._spectrum_win = SpectrumWindow(parent=None)
+            geo = self.frameGeometry()
+            self._spectrum_win.move(geo.left(), geo.bottom() + 2)
+        self._spectrum_win.show()
+        self._spectrum_win.raise_()
+
+    def _show_eq_window(self) -> None:
+        if self._eq_win is None:
+            src = self._config.source
+            self._eq_win = EQWindow(
+                sample_rate=float(src.sample_rate),
+                channels=src.channels,
+                parent=None,
+            )
+            geo = self.frameGeometry()
+            self._eq_win.move(geo.left(), geo.bottom() + 2)
+        self._eq_win.show()
+        self._eq_win.raise_()
+
+    # ------------------------------------------------------------------
+    # Snap: main window participates in SnapManager
+    # ------------------------------------------------------------------
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        from src.ui.snappable_window import SnappableWindow
+        if SnappableWindow._moving:
+            return
+        delta = event.pos() - event.oldPos()
+        if delta.isNull():
+            return
+        manager = SnapManager.instance()
+        group   = manager.get_group(self)
+        SnappableWindow._moving = True
+        try:
+            for w in group:
+                if w is not self:
+                    w.move(w.pos() + delta)
+            snap = manager.compute_snap(self, group)
+            if snap:
+                adj = QPoint(snap[0], snap[1])
+                self.move(self.pos() + adj)
+                for w in group:
+                    if w is not self:
+                        w.move(w.pos() + adj)
+        finally:
+            SnappableWindow._moving = False
+
     # ------------------------------------------------------------------
     # Source device enumeration
     # ------------------------------------------------------------------
@@ -642,6 +761,9 @@ class MainWindow(QMainWindow):
             self._monitor.set_on_level(
                 lambda l, r: self._sig.level_update.emit(l, r)
             )
+            if self._spectrum_win:
+                self._monitor.set_on_pcm(self._spectrum_win.set_pcm)
+            self._monitor.set_gain_db(self._config.settings.gain_db)
             self._monitor.start(
                 device_index=dev_data.index,
                 sample_rate=src.sample_rate,
@@ -660,7 +782,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             self._monitor = None
-        self.meter_panel.meter.set_levels(0.0, 0.0)
+        if self._meter_win: self._meter_win.set_levels(0.0, 0.0)
 
     def _on_source_changed(self, _index: int) -> None:
         """Restart monitor and save device selection when user picks a device."""
@@ -680,7 +802,7 @@ class MainWindow(QMainWindow):
         right = env + 0.12 * math.sin(t * 4.7 + 0.8) + 0.04 * random.random()
         left  = max(0.0, min(0.98, left))
         right = max(0.0, min(0.98, right))
-        self.meter_panel.meter.set_levels(left, right)
+        if self._meter_win: self._meter_win.set_levels(left, right)
 
     # ------------------------------------------------------------------
     # Logging
@@ -723,6 +845,14 @@ class MainWindow(QMainWindow):
         self._audio_engine.set_on_level(
             lambda l, r: self._sig.level_update.emit(l, r)
         )
+        # Feed raw PCM to spectrum (set_pcm is thread-safe — only numpy + update())
+        if self._spectrum_win:
+            self._audio_engine.set_on_pcm(self._spectrum_win.set_pcm)
+        # Apply master gain
+        self._audio_engine.set_gain_db(self._config.settings.gain_db)
+        # Update EQ processor sample rate if window exists
+        if self._eq_win:
+            self._eq_win.set_sample_rate(float(src.sample_rate))
 
         # --- Encoder slots ---
         self._slots = []
@@ -816,7 +946,10 @@ class MainWindow(QMainWindow):
 
         # Reset UI
         self._set_broadcasting_ui(False)
-        self.meter_panel.meter.set_levels(0.0, 0.0)
+        if self._meter_win:
+            self._meter_win.set_levels(0.0, 0.0)
+        if self._spectrum_win:
+            self._spectrum_win.reset()
         self.encoder_table.reset_stats()
         self.np_label.setText("Now Playing: —")
         self._update_title(0)
@@ -895,7 +1028,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_level_update(self, left: float, right: float) -> None:
-        self.meter_panel.meter.set_levels(left, right)
+        if self._meter_win:
+            self._meter_win.set_levels(left, right)
 
     def _on_status_changed(self, enc_id: str, status: str) -> None:
         self.encoder_table.update_status(enc_id, status)
@@ -919,6 +1053,9 @@ class MainWindow(QMainWindow):
     def _on_stats_update(self, enc_id: str, listeners: int, peak: int) -> None:
         if enc_id == "__total__":
             self._update_title(listeners)
+            streams = sum(1 for s in self._slots if s.status == "connected")
+            title = self.np_label.text().replace("Now Playing: ", "")
+            self._update_compact_bar(streams, max(0, listeners), title)
         else:
             self.encoder_table.update_stats(enc_id, listeners, peak)
 
@@ -1005,7 +1142,7 @@ class MainWindow(QMainWindow):
             self._log("Settings saved.")
             self._save_config()
             # Apply meter style change immediately (hot-swap the widget)
-            self.meter_panel.set_style(self._config.settings.meter_style)
+            if self._meter_win: self._meter_win.set_style(self._config.settings.meter_style)
 
         if was_running:
             self._on_start_all()
@@ -1088,12 +1225,45 @@ class MainWindow(QMainWindow):
             self._on_stop_all()
         self._stop_monitor()
         self._log_dialog.hide()
-        # Persist window geometry and splitter layout
+
+        # Persist main window geometry
         s = self._config.settings
         s.window_x = self.x()
         s.window_y = self.y()
         s.window_w = self.width()
-        s.window_h = self.height()
-        s.splitter_state = base64.b64encode(self._splitter.saveState().data()).decode()
+        s.window_h = self.height() if not self._compact else getattr(self, "_full_height", self.height())
+        s.gain_db  = self._config.settings.gain_db
+
+        # Persist satellite window state
+        if self._meter_win:
+            g = self._meter_win.geometry()
+            s.meter_x, s.meter_y = g.x(), g.y()
+            s.meter_w, s.meter_h = g.width(), g.height()
+            s.meter_visible = self._meter_win.isVisible()
+        else:
+            s.meter_visible = False
+
+        if self._spectrum_win:
+            g = self._spectrum_win.geometry()
+            s.spectrum_x, s.spectrum_y = g.x(), g.y()
+            s.spectrum_w, s.spectrum_h = g.width(), g.height()
+            s.spectrum_visible = self._spectrum_win.isVisible()
+        else:
+            s.spectrum_visible = False
+
+        if self._eq_win:
+            g = self._eq_win.geometry()
+            s.eq_x, s.eq_y = g.x(), g.y()
+            s.eq_w, s.eq_h = g.width(), g.height()
+            s.eq_visible = self._eq_win.isVisible()
+        else:
+            s.eq_visible = False
+
+        # Close satellite windows cleanly
+        for w in (self._meter_win, self._spectrum_win, self._eq_win):
+            if w:
+                w.close()
+
+        SnapManager.instance().unregister(self)
         self._save_config()
         event.accept()

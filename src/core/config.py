@@ -86,10 +86,27 @@ class AppSettings:
     http_api_password:  str  = ""
     window_x:           int  = -1    # -1 = let OS decide
     window_y:           int  = -1
-    window_w:           int  = 660
-    window_h:           int  = 340
+    window_w:           int  = 520
+    window_h:           int  = 320
     dock_state:         str  = ""    # kept for backward compat (unused)
-    splitter_state:     str  = ""   # base64 QSplitter sizes (main_window)
+    splitter_state:     str  = ""    # kept for backward compat (unused)
+    gain_db:            float = 0.0  # master input gain in dB
+    # Satellite window positions (-1 = not yet placed)
+    meter_x:            int  = -1
+    meter_y:            int  = -1
+    meter_w:            int  = 160
+    meter_h:            int  = 300
+    meter_visible:      bool = True
+    spectrum_x:         int  = -1
+    spectrum_y:         int  = -1
+    spectrum_w:         int  = 400
+    spectrum_h:         int  = 160
+    spectrum_visible:   bool = False
+    eq_x:               int  = -1
+    eq_y:               int  = -1
+    eq_w:               int  = 580
+    eq_h:               int  = 380
+    eq_visible:         bool = False
 
 
 # ---------------------------------------------------------------------------

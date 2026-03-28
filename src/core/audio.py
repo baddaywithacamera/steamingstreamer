@@ -57,7 +57,9 @@ class AudioEngine:
         self._stream = None
         self._slots:    list     = []
         self._running:  bool     = False
+        self._gain:     float    = 1.0          # linear multiplier (master gain)
         self._on_level: Optional[Callable[[float, float], None]] = None
+        self._on_pcm:   Optional[Callable[[bytes, float, int], None]] = None
         self._on_log:   Optional[Callable[[str], None]]          = None
 
     # ------------------------------------------------------------------
@@ -68,8 +70,17 @@ class AudioEngine:
         """cb(left_rms, right_rms) — called on audio thread at ~30fps."""
         self._on_level = cb
 
+    def set_on_pcm(self, cb: Callable[[bytes, float, int], None]) -> None:
+        """cb(raw_bytes, sample_rate, channels) — called per audio block (spectrum feed)."""
+        self._on_pcm = cb
+
     def set_on_log(self, cb: Callable[[str], None]) -> None:
         self._on_log = cb
+
+    def set_gain_db(self, db: float) -> None:
+        """Set master input gain in dB. Thread-safe (atomic float write)."""
+        import math
+        self._gain = 10.0 ** (db / 20.0)
 
     # ------------------------------------------------------------------
     # Slot management
@@ -194,22 +205,38 @@ class AudioEngine:
         if status:
             self._log(f"Audio buffer: {status}")
 
-        raw = bytes(indata)
-
-        # Level metering (RMS per channel)
-        if self._on_level and SOUNDDEVICE_AVAILABLE:
+        # Apply master gain
+        if SOUNDDEVICE_AVAILABLE and self._gain != 1.0:
             try:
-                arr = indata.astype(np.float32) / 32768.0
-                if arr.shape[1] >= 2:
-                    l_rms = float(np.sqrt(np.mean(arr[:, 0] ** 2)))
-                    r_rms = float(np.sqrt(np.mean(arr[:, 1] ** 2)))
-                else:
-                    v = float(np.sqrt(np.mean(arr ** 2)))
-                    l_rms = r_rms = v
-                # Boost RMS to approximate VU meter response
-                l_rms = min(1.0, l_rms * 3.0)
-                r_rms = min(1.0, r_rms * 3.0)
-                self._on_level(l_rms, r_rms)
+                arr = np.clip(
+                    indata.astype(np.float32) * self._gain,
+                    -32768.0, 32767.0
+                ).astype(np.int16)
+            except Exception:
+                arr = indata
+        else:
+            arr = indata
+
+        raw = bytes(arr)
+
+        # Level metering (RMS per channel, post-gain)
+        if (self._on_level or self._on_pcm) and SOUNDDEVICE_AVAILABLE:
+            try:
+                farr = arr.astype(np.float32) / 32768.0
+                channels = farr.shape[1] if farr.ndim > 1 else 1
+                if self._on_level:
+                    if farr.ndim > 1 and farr.shape[1] >= 2:
+                        l_rms = float(np.sqrt(np.mean(farr[:, 0] ** 2)))
+                        r_rms = float(np.sqrt(np.mean(farr[:, 1] ** 2)))
+                    else:
+                        v = float(np.sqrt(np.mean(farr ** 2)))
+                        l_rms = r_rms = v
+                    # Boost RMS to approximate VU meter response
+                    l_rms = min(1.0, l_rms * 3.0)
+                    r_rms = min(1.0, r_rms * 3.0)
+                    self._on_level(l_rms, r_rms)
+                if self._on_pcm:
+                    self._on_pcm(raw, float(self._stream.samplerate), channels)
             except Exception:
                 pass
 
